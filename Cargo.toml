@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 redkar-chess = { git = "https://github.com/INDA23PlusPlus/redkar-chess" }
+#redkar-chess = { git = "https://github.com/ErikFrankling/redkar-chess" }
+ggez = "0.9.3"
