@@ -1,6 +1,6 @@
 use ggez::event::MouseButton;
 use ggez::{event, conf};
-use ggez::graphics::{self, Color, Rect};
+use ggez::graphics::{self, Color, Rect, Text, TextFragment, PxScale};
 use ggez::{Context, GameResult};
 use ggez::glam::*;
 use redkar_chess::*;
@@ -8,7 +8,10 @@ use core::fmt;
 use std::fmt::Display;
 use std::{env, path};
 
-const SQUARE_SIZE: f32 = 130.0;
+const SCALE: f32 = 0.75;
+const SQUARE_SIZE: f32 = 130.0 * SCALE;
+const TEXT_SIZE: f32 = 25.0 * SCALE;
+const SIDEBAR_SIZE: f32 = 400.0;
 
 struct MainState {
     pawn_image_w: graphics::Image,
@@ -30,6 +33,9 @@ struct MainState {
     pos_x: f32,
     pos_y: f32,
     last_move: Option<Move>,
+    controls_text: graphics::Text,
+    text: Text,
+    decision: Option<Decision>,
 }
 
 impl MainState {
@@ -46,6 +52,9 @@ impl MainState {
         let knight_image_b = graphics::Image::from_path(ctx, "/knight-b.png")?;
         let rook_image_w = graphics::Image::from_path(ctx, "/rook-w.png")?;
         let rook_image_b = graphics::Image::from_path(ctx, "/rook-b.png")?;
+
+        let mut controls_text = Text::new("Controls:\n\nHold left click and drag to move a piece and just release left click on the destination square to make the move.");
+        controls_text.set_scale(PxScale::from(TEXT_SIZE));
 
         let s = MainState {
             pawn_image_w,
@@ -67,6 +76,9 @@ impl MainState {
             pos_x: 0.0,
             pos_y: 0.0,
             last_move: None,
+            controls_text,
+            text: Text::new(""),
+            decision: None,
         };
 
         Ok(s)
@@ -165,13 +177,52 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     selected_image = image;
                 }
                 else {
-                    canvas.draw(image, pos);
+                    canvas.draw(image, graphics::DrawParam::new()
+                        .dest(pos)
+                        .scale(Vec2::new(0.75, 0.75)));
                 }
             }
         }
 
         if self.selected.is_some() {
-            canvas.draw(selected_image, relative_pos);
+            canvas.draw(selected_image, graphics::DrawParam::new()
+                .dest(relative_pos)
+                .scale(Vec2::new(0.75, 0.75)));
+        }
+
+        let _ = &self.text.set_scale(TEXT_SIZE)
+            .set_bounds(Vec2::new(SIDEBAR_SIZE - TEXT_SIZE * 2.0, f32::INFINITY))
+            .set_wrap(true);
+        
+        let _ = &self.controls_text.set_bounds(Vec2::new(SIDEBAR_SIZE - TEXT_SIZE * 2.0, f32::INFINITY))
+        .set_wrap(true);
+
+        let controls_text_pos = Vec2::new(8.0 * SQUARE_SIZE + TEXT_SIZE, TEXT_SIZE);
+        let text_pos = controls_text_pos + 
+            Vec2::new( 0.0, &self.controls_text.measure(ctx).unwrap().y + TEXT_SIZE);
+
+
+        canvas.draw(&self.controls_text, controls_text_pos);
+        canvas.draw(&self.text, text_pos);
+
+        if let Some(r) = &self.decision {
+            let mut text = Text::new("");
+            match r {
+                Decision::Black => {
+                    text = Text::new("Black won!");
+                },
+                Decision::White => {
+                    text = Text::new("White won!");
+                },
+                Decision::Tie => {
+                    text = Text::new("Draw!");
+                },
+            }
+            
+            let _ = text.set_scale(PxScale::from(55.0));
+            let text_pos = Vec2::new(3.0 * SQUARE_SIZE - 100.0, 3.0 * SQUARE_SIZE);
+            canvas.draw(&text, text_pos);
+
         }
 
         canvas.finish(ctx)?;
@@ -214,9 +265,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        self.start_x = x;
-        self.start_y = y;
-        self.selected = Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()));
+        if self.decision.is_none() {
+            self.start_x = x;
+            self.start_y = y;
+            self.selected = Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()));
+        }
         Ok(())
     }
 
@@ -227,6 +280,10 @@ impl event::EventHandler<ggez::GameError> for MainState {
         x: f32,
         y: f32,
     ) -> GameResult {
+        if self.decision.is_some() {
+            return Ok(());
+        }
+
         let mv = Move { 
             start_x: self.selected.unwrap().x as usize, 
             start_y: self.selected.unwrap().y as usize, 
@@ -237,23 +294,20 @@ impl event::EventHandler<ggez::GameError> for MainState {
         if self.selected != Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor())) {
             match self.game.do_move(mv) {
                 Ok(result) => {
-                    println!("{:?} moved {:?} from {} to {}",
-                    self.game.turn, 
-                    self.game.board[self.selected.unwrap().y as usize][self.selected.unwrap().x as usize],
-                    cords_to_square(self.selected.unwrap().x, self.selected.unwrap().y), 
-                    cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()));
+                    self.text = Text::new(
+                        format!("{:?} moved {:?} from {} to {}",
+                            self.game.turn, 
+                            self.game.board[self.selected.unwrap().y as usize][self.selected.unwrap().x as usize],
+                            cords_to_square(self.selected.unwrap().x, self.selected.unwrap().y), 
+                            cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor())
+                        ));
 
                     self.last_move = Some(mv);
 
-                    //TODO: add menu for handling game result
-                    match result {
-                        Some(Decision::White) => println!("White won!"),
-                        Some(Decision::Black) => println!("Black won!"),
-                        Some(Decision::Tie) => println!("Draw!"),
-                        None => (),
-                    }
+                    self.decision = result;
                 },
-                Err(e) => println!("Move failed: {:?}", e),
+                Err(e) => self.text = Text::new(
+                    format!("Move error: {}", explain_move_error(e)))
             }
         }
 
@@ -268,7 +322,6 @@ fn explain_move_error(e: MoveError) -> String {
         MoveError::WrongColorPiece => "The piece at the given position is not the same color as the current player".to_string(),
         MoveError::OutsideBoard => "The given position is outside the board".to_string(),
         MoveError::FriendlyFire => "You can't capture your own pieces".to_string(),
-        MoveError::NoPiece => "There is no piece at the given position".to_string(),
         MoveError::BlockedPath => "The path to the given position is blocked".to_string(),
         MoveError::SelfCheck => "You can't put yourself in check".to_string(),
         MoveError::Movement => "The piece can't move like that".to_string(),
@@ -286,20 +339,10 @@ fn cords_to_square(x: f32, y: f32) -> String {
         5 => "f".to_string(),
         6 => "g".to_string(),
         7 => "h".to_string(),
-        _ => panic!("Invalid x coordinate"),
+        _ => unreachable!(),
     };
 
-    t + match y as u8 {
-        0 => "8".to_string(),
-        1 => "7".to_string(),
-        2 => "6".to_string(),
-        3 => "5".to_string(),
-        4 => "4".to_string(),
-        5 => "3".to_string(),
-        6 => "2".to_string(),
-        7 => "1".to_string(),
-        _ => panic!("Invalid y coordinate"),
-    }.as_str()
+    t + y.to_string().as_str()
 }
 
 pub fn main() -> GameResult {
@@ -315,7 +358,7 @@ pub fn main() -> GameResult {
     .add_resource_path(resource_dir)
     .window_mode(
         conf::WindowMode::default()
-            .dimensions(SQUARE_SIZE * 8.0 + 400.0, SQUARE_SIZE * 8.0),
+            .dimensions(SQUARE_SIZE * 8.0 + SIDEBAR_SIZE, SQUARE_SIZE * 8.0),
     );
     let (mut ctx, event_loop) = cb.build()?;
     let state = MainState::new(&mut ctx)?;
