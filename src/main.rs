@@ -345,7 +345,11 @@ fn cords_to_square(x: f32, y: f32) -> String {
     t + y.to_string().as_str()
 }
 
+mod serde;
+
 pub fn main() -> GameResult {
+    serde::run().unwrap();
+
     let resource_dir = if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
         let mut path = path::PathBuf::from(manifest_dir);
         path.push("resources");
