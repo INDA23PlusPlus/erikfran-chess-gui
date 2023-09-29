@@ -1,12 +1,28 @@
-use ggez::event::MouseButton;
-use ggez::{event, conf};
-use ggez::graphics::{self, Color, Rect, Text, TextFragment, PxScale};
-use ggez::{Context, GameResult};
-use ggez::glam::*;
+use cgmath::Vector3;
 use redkar_chess::*;
-use core::fmt;
-use std::fmt::Display;
+use winit::{
+	event::*,
+	event_loop::{ControlFlow, EventLoop},
+	window::WindowBuilder,
+};
+
+use std::collections::HashMap;
 use std::{env, path};
+
+use std::iter;
+use std::time::Instant;
+use ggez::glam::Vec2;
+
+
+use ::egui::FontDefinitions;
+use egui_wgpu;
+use erikfran_chess_gui::*;
+use cgmath::Quaternion;
+
+use egui_wgpu::renderer::Renderer;
+
+const INITIAL_WIDTH: u32 = SQUARE_SIZE as u32 * 8 + SIDEBAR_SIZE as u32;
+const INITIAL_HEIGHT: u32 = SQUARE_SIZE as u32 * 8;
 
 const SCALE: f32 = 0.75;
 const SQUARE_SIZE: f32 = 130.0 * SCALE;
@@ -14,18 +30,6 @@ const TEXT_SIZE: f32 = 25.0 * SCALE;
 const SIDEBAR_SIZE: f32 = 400.0;
 
 struct MainState {
-    pawn_image_w: graphics::Image,
-    pawn_image_b: graphics::Image,
-    king_image_w: graphics::Image,
-    king_image_b: graphics::Image,
-    queen_image_w: graphics::Image,
-    queen_image_b: graphics::Image,
-    bishop_image_w: graphics::Image,
-    bishop_image_b: graphics::Image,
-    knight_image_w: graphics::Image,
-    knight_image_b: graphics::Image,
-    rook_image_w: graphics::Image,
-    rook_image_b: graphics::Image,
     game: Game,
     selected: Option<Vec2>,
     start_x: f32,
@@ -33,42 +37,30 @@ struct MainState {
     pos_x: f32,
     pos_y: f32,
     last_move: Option<Move>,
-    controls_text: graphics::Text,
-    text: Text,
     decision: Option<Decision>,
+    instances_hashmap: HashMap<String, Vec<Instance>>,
+    mouse_position_x: f32,
+    mouse_position_y: f32,
 }
 
 impl MainState {
-    fn new(ctx: &mut Context) -> GameResult<MainState> {
-        let pawn_image_w = graphics::Image::from_path(ctx, "/pawn-w.png")?;
-        let pawn_image_b = graphics::Image::from_path(ctx, "/pawn-b.png")?;
-        let king_image_w = graphics::Image::from_path(ctx, "/king-w.png")?;
-        let king_image_b = graphics::Image::from_path(ctx, "/king-b.png")?;
-        let queen_image_w = graphics::Image::from_path(ctx, "/queen-w.png")?;
-        let queen_image_b = graphics::Image::from_path(ctx, "/queen-b.png")?;
-        let bishop_image_w = graphics::Image::from_path(ctx, "/bishop-w.png")?;
-        let bishop_image_b = graphics::Image::from_path(ctx, "/bishop-b.png")?;
-        let knight_image_w = graphics::Image::from_path(ctx, "/knight-w.png")?;
-        let knight_image_b = graphics::Image::from_path(ctx, "/knight-b.png")?;
-        let rook_image_w = graphics::Image::from_path(ctx, "/rook-w.png")?;
-        let rook_image_b = graphics::Image::from_path(ctx, "/rook-b.png")?;
+    fn new() -> Self{
+        let mut instances_hashmap: HashMap<String, Vec<Instance>> = HashMap::new();
 
-        let mut controls_text = Text::new("Controls:\n\nHold left click and drag to move a piece and just release left click on the destination square to make the move.");
-        controls_text.set_scale(PxScale::from(TEXT_SIZE));
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Pawn, color: Color::White }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Rook, color: Color::White }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Knight, color: Color::White }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Bishop, color: Color::White }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Queen, color: Color::White }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::King, color: Color::White }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Pawn, color: Color::Black }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Rook, color: Color::Black }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Knight, color: Color::Black }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Bishop, color: Color::Black }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::Queen, color: Color::Black }), Vec::<Instance>::new());
+        instances_hashmap.insert(piece_to_key(Piece { piece: PieceType::King, color: Color::Black }), Vec::<Instance>::new());
 
-        let s = MainState {
-            pawn_image_w,
-            pawn_image_b,
-            king_image_w,
-            king_image_b,
-            queen_image_w,
-            queen_image_b,
-            bishop_image_w,
-            bishop_image_b,
-            knight_image_w,
-            knight_image_b,
-            rook_image_w,
-            rook_image_b,
+        MainState {
             game: Game::new_game(),
             selected: None,
             start_x: 0.0,
@@ -76,58 +68,24 @@ impl MainState {
             pos_x: 0.0,
             pos_y: 0.0,
             last_move: None,
-            controls_text,
-            text: Text::new(""),
             decision: None,
-        };
-
-        Ok(s)
+            instances_hashmap,
+            mouse_position_x: 0.0,
+            mouse_position_y: 0.0,
+        }
     }
 }
 
-impl event::EventHandler<ggez::GameError> for MainState {
-    fn update(&mut self, _ctx: &mut Context) -> GameResult {
-        Ok(())
-    }
-
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        let mut canvas = graphics::Canvas::from_frame(
-            ctx,
-            Color::BLACK,
-        );
-
-        let white_square = graphics::Mesh::new_rectangle(
-            ctx,
-            graphics::DrawMode::fill(),
-            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-            Color::WHITE,
-        )?;
-        let black_square = graphics::Mesh::new_rectangle(
-            ctx,
-            graphics::DrawMode::fill(),
-            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-            Color::from_rgb(180, 135, 103,),
-        )?;
-        let white_selected_square = graphics::Mesh::new_rectangle(
-            ctx,
-            graphics::DrawMode::fill(),
-            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-            Color::from_rgb(207, 209, 134)
-        )?;
-        let black_selected_square = graphics::Mesh::new_rectangle(
-            ctx,
-            graphics::DrawMode::fill(),
-            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-            Color::from_rgb(170, 162, 87)
-        )?;
-
-        let mut selected_image: &graphics::Image = &self.pawn_image_w;
+impl MainState {
+    fn draw(&mut self) {
         let mut relative_pos: Vec2 = Vec2::new(0.0, 0.0);
 
         let (last_move_pos_from, last_move_pos_to) = match self.last_move {
             Some(mv) => (Vec2::new(mv.start_x as f32, mv.start_y as f32), Vec2::new(mv.end_x as f32, mv.end_y as f32)),
             None => (Vec2::new(-1.0, -1.0), Vec2::new(-1.0, -1.0)),
         };
+
+        let mut selected_piece: Piece = Piece { piece: PieceType::Pawn, color: Color::White };
 
         for x in 0..8 {
             for y in 0..8 {
@@ -141,102 +99,70 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 
                 if (x + y) % 2 == 0 {
                     if selected {
-                        canvas.draw(&black_selected_square, pos);
+                        //canvas.draw(&black_selected_square, pos);
                     }
                     else {
-                        canvas.draw(&black_square, pos);
+                        //canvas.draw(&black_square, pos);
                     }
                 } 
                 else {
                     if selected {
-                        canvas.draw(&white_selected_square, pos);
+                        //canvas.draw(&white_selected_square, pos);
                     }
                     else {
-                        canvas.draw(&white_square, pos);
+                        //canvas.draw(&white_square, pos);
                     }
                 }
 
-                let image = match self.game.board[y][x] {
-                    Some( Piece { piece: PieceType::Pawn, color: redkar_chess::Color::White } ) => &self.pawn_image_w,
-                    Some( Piece { piece: PieceType::Pawn, color: redkar_chess::Color::Black } ) => &self.pawn_image_b,
-                    Some( Piece { piece: PieceType::King, color: redkar_chess::Color::White } ) => &self.king_image_w,
-                    Some( Piece { piece: PieceType::King, color: redkar_chess::Color::Black } ) => &self.king_image_b,
-                    Some( Piece { piece: PieceType::Queen, color: redkar_chess::Color::White } ) => &self.queen_image_w,
-                    Some( Piece { piece: PieceType::Queen, color: redkar_chess::Color::Black } ) => &self.queen_image_b,
-                    Some( Piece { piece: PieceType::Bishop, color: redkar_chess::Color::White } ) => &self.bishop_image_w,
-                    Some( Piece { piece: PieceType::Bishop, color: redkar_chess::Color::Black } ) => &self.bishop_image_b,
-                    Some( Piece { piece: PieceType::Knight, color: redkar_chess::Color::White } ) => &self.knight_image_w,
-                    Some( Piece { piece: PieceType::Knight, color: redkar_chess::Color::Black } ) => &self.knight_image_b,
-                    Some( Piece { piece: PieceType::Rook, color: redkar_chess::Color::White } ) => &self.rook_image_w,
-                    Some( Piece { piece: PieceType::Rook, color: redkar_chess::Color::Black } ) => &self.rook_image_b,
+                let piece = match self.game.board[y][x] {
+                    Some(piece) => piece,
                     None => continue,
                 };
-                
+
                 if self.selected == Some(pos_unit) && self.game.board[y][x].is_some() {
                     relative_pos = pos + Vec2::new(self.pos_x - self.start_x, self.pos_y - self.start_y);
-                    selected_image = image;
+                    selected_piece = piece;
                 }
                 else {
-                    canvas.draw(image, graphics::DrawParam::new()
-                        .dest(pos)
-                        .scale(Vec2::new(0.75, 0.75)));
+                    self.instances_hashmap.get_mut(&piece_to_key(piece)).unwrap().push(
+                        Instance { 
+                            position: Vector3::new(pos.x, pos.y, 0.0),
+                            rotation: Quaternion::new(0.0, 0.0, 0.0, 0.0),
+                            scale: MODEL_SCALE,
+                        });
                 }
             }
         }
 
         if self.selected.is_some() {
-            canvas.draw(selected_image, graphics::DrawParam::new()
-                .dest(relative_pos)
-                .scale(Vec2::new(0.75, 0.75)));
+            self.instances_hashmap.get_mut(&piece_to_key(selected_piece)).unwrap().push(
+                Instance { 
+                    position: Vector3::new(relative_pos.x, relative_pos.y, 0.0),
+                    rotation: Quaternion::new(0.0, 0.0, 0.0, 0.0),
+                    scale: MODEL_SCALE,
+                });
         }
-
-        let _ = &self.text.set_scale(TEXT_SIZE)
-            .set_bounds(Vec2::new(SIDEBAR_SIZE - TEXT_SIZE * 2.0, f32::INFINITY))
-            .set_wrap(true);
-        
-        let _ = &self.controls_text.set_bounds(Vec2::new(SIDEBAR_SIZE - TEXT_SIZE * 2.0, f32::INFINITY))
-        .set_wrap(true);
-
-        let controls_text_pos = Vec2::new(8.0 * SQUARE_SIZE + TEXT_SIZE, TEXT_SIZE);
-        let text_pos = controls_text_pos + 
-            Vec2::new( 0.0, &self.controls_text.measure(ctx).unwrap().y + TEXT_SIZE);
-
-
-        canvas.draw(&self.controls_text, controls_text_pos);
-        canvas.draw(&self.text, text_pos);
 
         if let Some(r) = &self.decision {
-            let mut text = Text::new("");
             match r {
                 Decision::Black => {
-                    text = Text::new("Black won!");
+                    println!("Black won!");
                 },
                 Decision::White => {
-                    text = Text::new("White won!");
+                    println!("White won!");
                 },
                 Decision::Tie => {
-                    text = Text::new("Draw!");
+                    println!("Draw!");
                 },
             }
-            
-            let _ = text.set_scale(PxScale::from(55.0));
-            let text_pos = Vec2::new(3.0 * SQUARE_SIZE - 100.0, 3.0 * SQUARE_SIZE);
-            canvas.draw(&text, text_pos);
-
         }
-
-        canvas.finish(ctx)?;
-        Ok(())
     }
 
     fn mouse_motion_event(
         &mut self,
-        _ctx: &mut Context,
         x: f32,
         y: f32,
-        xrel: f32,
-        yrel: f32,
-    ) -> GameResult {
+    ) {
 
         // Mouse coordinates are PHYSICAL coordinates, but here we want logical coordinates.
 
@@ -255,64 +181,61 @@ impl event::EventHandler<ggez::GameError> for MainState {
         */
 
         //println!("Mouse motion, x: {x}, y: {y}, relative x: {xrel}, relative y: {yrel}");
-        Ok(())
     }
 
     fn mouse_button_down_event(
         &mut self,
-        _ctx: &mut Context,
         button: MouseButton,
         x: f32,
         y: f32,
-    ) -> GameResult {
-        if self.decision.is_none() {
-            self.start_x = x;
-            self.start_y = y;
-            self.selected = Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()));
+    ) {
+        if let MouseButton::Left = button {
+            if self.decision.is_none() {
+                self.start_x = x;
+                self.start_y = y;
+                self.selected = Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()));
+            }
         }
-        Ok(())
     }
 
     fn mouse_button_up_event(
         &mut self,
-        _ctx: &mut Context,
         button: MouseButton,
         x: f32,
         y: f32,
-    ) -> GameResult {
-        if self.decision.is_some() {
-            return Ok(());
-        }
+    ) {
+        if let MouseButton::Left = button {
+            if self.decision.is_some() {
+                return;
+            }
 
-        let mv = Move { 
-            start_x: self.selected.unwrap().x as usize, 
-            start_y: self.selected.unwrap().y as usize, 
-            end_x: (x / SQUARE_SIZE).floor() as usize, 
-            end_y: (y / SQUARE_SIZE).floor() as usize
-        };
+            let mv = Move { 
+                start_x: self.selected.unwrap().x as usize, 
+                start_y: self.selected.unwrap().y as usize, 
+                end_x: (x / SQUARE_SIZE).floor() as usize, 
+                end_y: (y / SQUARE_SIZE).floor() as usize
+            };
 
-        if self.selected != Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor())) {
-            match self.game.do_move(mv) {
-                Ok(result) => {
-                    self.text = Text::new(
-                        format!("{:?} moved {:?} from {} to {}",
+            if self.selected != Some(Vec2::new((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor())) {
+                match self.game.do_move(mv) {
+                    Ok(result) => {
+                        println!("{:?} moved {:?} from {} to {}",
                             self.game.turn, 
                             self.game.board[self.selected.unwrap().y as usize][self.selected.unwrap().x as usize],
                             cords_to_square(self.selected.unwrap().x, self.selected.unwrap().y), 
                             cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor())
-                        ));
+                        );
 
-                    self.last_move = Some(mv);
+                        self.last_move = Some(mv);
 
-                    self.decision = result;
-                },
-                Err(e) => self.text = Text::new(
-                    format!("Move error: {}", explain_move_error(e)))
+                        self.decision = result;
+                    },
+                    Err(e) => println!("Move error: {}", explain_move_error(e)),
+                }
             }
-        }
 
-        self.selected = None;
-        Ok(())
+            self.selected = None;
+        }
     }
 }
 
@@ -345,22 +268,93 @@ fn cords_to_square(x: f32, y: f32) -> String {
     t + y.to_string().as_str()
 }
 
-pub fn main() -> GameResult {
-    let resource_dir = if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
-        let mut path = path::PathBuf::from(manifest_dir);
-        path.push("resources");
-        path
-    } else {
-        path::PathBuf::from("./resources")
-    };
 
-    let cb = ggez::ContextBuilder::new("chess", "Erik Frankling")
-    .add_resource_path(resource_dir)
-    .window_mode(
-        conf::WindowMode::default()
-            .dimensions(SQUARE_SIZE * 8.0 + SIDEBAR_SIZE, SQUARE_SIZE * 8.0),
-    );
-    let (mut ctx, event_loop) = cb.build()?;
-    let state = MainState::new(&mut ctx)?;
-    event::run(ctx, event_loop, state);
+fn main() {
+    pollster::block_on(run());
 }
+
+async fn run() {
+    let mut main_state = MainState::new();
+
+    env_logger::init();
+
+    let event_loop = EventLoop::new();
+
+    let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+	let mut state = State::new(window).await;
+
+    // Handle events. Refer to `winit` docs for more information.
+	event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
+
+        match event {
+            Event::WindowEvent {
+				ref event,
+				window_id,
+			} if window_id == state.window().id() => if !state.input(event) {
+				match event {
+                    WindowEvent::CursorMoved { position, .. } => {
+                        main_state.mouse_motion_event(position.x as f32, position.y as f32);
+                    },
+                    WindowEvent::MouseInput { state, button, .. } => {
+                        match state {
+                            winit::event::ElementState::Pressed => {
+                                main_state.mouse_button_down_event(*button, main_state.mouse_position_x, main_state.mouse_position_y);
+                            },
+                            winit::event::ElementState::Released => {
+                                main_state.mouse_button_up_event(*button, main_state.mouse_position_x, main_state.mouse_position_y);
+                            },
+                        }
+                    },
+					WindowEvent::CloseRequested
+					| WindowEvent::KeyboardInput {
+						input:
+							KeyboardInput {
+								state: ElementState::Pressed,
+								virtual_keycode: Some(VirtualKeyCode::Escape),
+								..
+							},
+						..
+					} => {
+                        *control_flow = ControlFlow::Exit
+                    },
+					WindowEvent::Resized(physical_size) => {
+						state.resize(*physical_size);
+					}
+					WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+						// new_inner_size is &&mut so we have to dereference it twice
+						state.resize(**new_inner_size);
+					}
+					_ => {}
+				}
+			}
+            Event::MainEventsCleared => {
+                // RedrawRequested will only trigger once, unless we manually
+				// request it.
+				state.window().request_redraw();
+            },
+			Event::RedrawRequested(window_id) if window_id == state.window().id() => {
+                main_state.draw();
+				state.update();
+                for i in main_state.instances_hashmap.keys() {
+                    match state.render(
+                        &main_state.instances_hashmap[i], 
+                        key_to_piece(i)
+                    ) {
+                        Ok(_) => {}
+                        // Reconfigure the surface if lost
+                        Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                        // The system is out of memory, we should probably quit
+                        Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                        // All other errors (Outdated, Timeout) should be resolved by the next frame
+                        Err(e) => eprintln!("{:?}", e),
+                    }
+                }
+			},
+			_ => *control_flow = ControlFlow::Poll
+        }
+    });
+}
+
+const MODEL_SCALE: f32 = 1.0;

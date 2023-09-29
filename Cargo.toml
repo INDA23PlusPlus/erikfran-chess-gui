@@ -5,7 +5,59 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+debug = true
+
 [dependencies]
 redkar-chess = { git = "https://github.com/INDA23PlusPlus/redkar-chess" }
 #redkar-chess = { git = "https://github.com/ErikFrankling/redkar-chess" }
 ggez = "0.9.3"
+egui = "0.23.0"
+epi = "0.17"
+egui_demo_lib = "0.19"
+egui-winit = "0.23.0"
+egui-wgpu = "0.23.0"
+egui_wgpu_backend = "0.19"
+leptos = { version = "0.4.4", features = ["csr", "nightly"] }
+instant = "0.1.12"
+getrandom = { version = "0.2", features = ["js"] }
+anyhow = "1.0"
+bytemuck = { version = "1.12", features = [ "derive" ] }
+cfg-if = "1"
+cgmath = "0.18"
+env_logger = "0.10"
+pollster = "0.3.0"
+log = "0.4"
+tobj = { version = "3.2", features = ["async"]}
+wgpu = "0.15"
+winit = { version="0.28.7", features = ["x11"]}
+nalgebra = "0.32.1"
+rand = "0.8.5"
+
+[dependencies.image]
+version = "0.24"
+default-features = false
+features = ["png", "jpeg"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+instant = "0.1.12"
+reqwest = { version = "0.11" }
+console_error_panic_hook = "0.1"
+console_log = "0.2"
+wgpu = { version = "0.15", features = ["webgl"]}
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+	"Document",
+	"Window",
+	"Element",
+	"Location",
+]}
+
+[build-dependencies]
+anyhow = "1.0"
+fs_extra = "1.2"
+glob = "0.3"
