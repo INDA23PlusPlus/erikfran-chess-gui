@@ -9,3 +9,7 @@ edition = "2021"
 redkar-chess = { git = "https://github.com/INDA23PlusPlus/redkar-chess" }
 #redkar-chess = { git = "https://github.com/ErikFrankling/redkar-chess" }
 ggez = "0.9.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chess-network-protocol = { path = "../chess-network-protocol"}# { git = "https://github.com/INDA23PlusPlus/chess-network-protocol" }
+ggegui = "0.3.7"
