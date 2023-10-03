@@ -5,33 +5,7 @@ use serde_json::de::IoRead;
 use std::net::TcpStream;
 use std::sync::mpsc::{Sender, Receiver};
 
-pub enum ClientToGame {
-    Move {
-        board: [[Piece; 8]; 8],
-        moves: Vec<Move>,
-        joever: Joever,
-        move_made: Move,
-        turn: Color,
-    },
-    Handshake {
-        board: [[Piece; 8]; 8],
-        moves: Vec<Move>,
-        features: Vec<Features>,
-        turn: Color,
-        joever: Joever,
-    },
-    Error {
-        board: [[Piece; 8]; 8],
-        moves: Vec<Move>,
-        joever: Joever,
-        message: String,
-        turn: Color,
-    },
-}
-
-pub struct GameToClient {
-    pub move_made: Move,
-}
+use crate::TcpToGame;
 
 fn switch_turn(turn: Color) -> Color {
     match turn {
@@ -40,7 +14,7 @@ fn switch_turn(turn: Color) -> Color {
     }
 }
 
-pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, server_color: Color) {
+pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Color) {
     let stream = TcpStream::connect("127.0.0.1:5000").unwrap();
     let mut de = serde_json::Deserializer::from_reader(&stream);
 
@@ -57,12 +31,11 @@ pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, serve
 
     let mut turn = switch_turn(server_color.clone());
 
-    sender.send(ClientToGame::Handshake {
+    sender.send(TcpToGame::Handshake {
         board: deserialized.board,
         moves: deserialized.moves,
         features: deserialized.features,
-        joever: deserialized.joever,
-        turn: turn.clone(),
+        server_color: server_color.clone(),
     }).unwrap();
 
     if &turn == &Color::White {
@@ -75,7 +48,7 @@ pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, serve
 
         match deserialized {
             ServerToClient::State { board, moves, joever, move_made } => {
-                sender.send(ClientToGame::Move { 
+                sender.send(TcpToGame::State { 
                     board, 
                     moves, 
                     joever, 
@@ -94,12 +67,12 @@ pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, serve
     }
 }
 
-fn make_move(sender: Sender<ClientToGame>, receiver: &Receiver<GameToClient>, turn: Color, stream: &TcpStream) -> Color {
+fn make_move(sender: Sender<TcpToGame>, receiver: &Receiver<Move>, turn: Color, stream: &TcpStream) -> Color {
     let mut de = serde_json::Deserializer::from_reader(stream);
     
     let move_made = receiver.recv().unwrap();
 
-    let mv = ClientToServer::Move(move_made.move_made);
+    let mv = ClientToServer::Move(move_made);
 
     //send
     serde_json::to_writer(stream, &mv).unwrap();
@@ -109,7 +82,7 @@ fn make_move(sender: Sender<ClientToGame>, receiver: &Receiver<GameToClient>, tu
 
     match deserialized {
         ServerToClient::State { board, moves, joever, move_made } => {
-            sender.send(ClientToGame::Move { 
+            sender.send(TcpToGame::State { 
                 board, 
                 moves, 
                 joever, 
@@ -120,13 +93,7 @@ fn make_move(sender: Sender<ClientToGame>, receiver: &Receiver<GameToClient>, tu
             return switch_turn(turn);
         },
         ServerToClient::Error { board, moves, joever, message } => {
-            sender.send(ClientToGame::Error { 
-                board, 
-                moves, 
-                joever, 
-                turn: turn.clone(),
-                message
-            }).unwrap();
+            sender.send(TcpToGame::Error { message }).unwrap();
 
             return make_move(sender, receiver, turn, stream);
         },

@@ -1,27 +1,21 @@
 #![feature(let_chains)]
 use ggez::event::MouseButton;
-use ggez::mint::Vector2;
 use ggez::{event, conf};
-use ggez::graphics::{self, Color, Rect, Text, TextFragment, PxScale, DrawParam};
+use ggez::graphics::{self, Rect, Text, PxScale, DrawParam};
 use ggez::{Context, GameResult, glam};
 use ggez::glam::*;
 
 use chess_network_protocol;
 
-use redkar_chess::*;
-
 mod redkar_chess_utils;
 
-use core::fmt;
-use std::fmt::Display;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::{env, path, thread};
 
 use ggegui::{egui, Gui};
-use ggegui::egui::{TextStyle::*, FontId, FontFamily::Proportional};
 
-use crate::redkar_chess_utils::*;
+use redkar_chess_utils::*;
+use chess_network_protocol::*;
 
 const SCALE: f32 = 0.75;
 const SQUARE_SIZE: f32 = 130.0 * SCALE;
@@ -29,6 +23,27 @@ const TEXT_SIZE: f32 = 25.0 * SCALE;
 const SIDEBAR_SIZE: f32 = 400.0;
 const UI_SCALE: f32 = 10.0;
 const FONT_SIZE: f32 = 32.0;
+
+pub enum TcpToGame {
+    Handshake {
+        board: [[Piece; 8]; 8],
+        moves: Vec<Move>,
+        features: Vec<Features>,
+        server_color: Color,
+    },
+    State {
+        board: [[Piece; 8]; 8],
+        moves: Vec<Move>,
+        joever: Joever,
+        move_made: Move,
+        turn: Color,
+    },
+    Error {
+        message: String,
+    },
+}
+
+
 
 struct MainState {
     pawn_image_w: graphics::Image,
@@ -43,7 +58,6 @@ struct MainState {
     knight_image_b: graphics::Image,
     rook_image_w: graphics::Image,
     rook_image_b: graphics::Image,
-    game: Game,
     selected: Option<Vec2>,
     start_x: f32,
     start_y: f32,
@@ -52,17 +66,17 @@ struct MainState {
     last_move: Option<Move>,
     controls_text: graphics::Text,
     text: Text,
-    decision: Option<Decision>,
+    joever: Joever,
     gui: Gui,
     is_server: Option<bool>,
     server_color: Option<chess_network_protocol::Color>,
     tcp_started: bool,
-    client_state: Option<client::ClientToGame>,
-    server_state: Option<server::ServerToGame>,
-    client_receiver: Option<Receiver<client::ClientToGame>>,
-    client_sender: Option<Sender<client::GameToClient>>,
-    server_receiver: Option<Receiver<server::ServerToGame>>,
-    server_sender: Option<Sender<server::GameToServer>>,
+    receiver: Option<Receiver<TcpToGame>>,
+    sender: Option<Sender<Move>>,
+    board: [[Piece; 8]; 8],
+    moves: Vec<Move>,
+    features: Vec<Features>,
+    turn: Color,
 }
 
 impl MainState {
@@ -109,7 +123,6 @@ impl MainState {
             knight_image_b,
             rook_image_w,
             rook_image_b,
-            game: Game::new_game(),
             selected: None,
             start_x: 0.0,
             start_y: 0.0,
@@ -118,17 +131,17 @@ impl MainState {
             last_move: None,
             controls_text,
             text: Text::new(""),
-            decision: None,
+            joever: Joever::Ongoing,
             gui,
             is_server: None,
             server_color: None,
             tcp_started: false,
-            client_state: None,
-            server_state: None,
-            client_receiver: None,
-            client_sender: None,
-            server_receiver: None,
-            server_sender: None,
+            receiver: None,
+            sender: None,
+            board: [[Piece::None; 8]; 8],
+            moves: vec![],
+            features: vec![],
+            turn: Color::White,
         };
 
         Ok(s)
@@ -138,89 +151,81 @@ impl MainState {
 impl event::EventHandler<ggez::GameError> for MainState {
 	fn update(&mut self, ctx: &mut Context) -> GameResult {
         let gui_ctx = self.gui.ctx();
-
-        if let Some(is_server) = self.is_server {
-            if !is_server {
-                if !self.tcp_started {
-                    if let Some(server_color) = self.server_color {
+        if let Some(receiver) = &self.receiver && !self.tcp_started {
+            if let Ok(message) = receiver.try_recv() {
+                match message {
+                    TcpToGame::Handshake { board, moves, features, server_color } => {
+                        self.board = board;
+                        self.moves = moves;
+                        self.features = features;
+                        self.server_color = Some(server_color);
                         self.tcp_started = true;
-                        
-                        let (client_sender, client_receiver) = std::sync::mpsc::channel();
-                        let (game_sender, game_receiver) = std::sync::mpsc::channel();
-                        
-                        self.client_receiver = Some(client_receiver);
-                        self.client_sender = Some(game_sender);
-
-                        thread::spawn(move || client::run(client_sender, game_receiver, server_color));
-                    }
-                }
-                else {
-                    if let Ok(state) = self.client_receiver.as_mut().unwrap().try_recv() {
-                        self.client_state = Some(state);
-                    }
-                }
-                if self.server_color.is_none() {
-                    egui::Area::new("").show(&gui_ctx, |ui| {
-                        //gui_ctx.set_pixels_per_point(UI_SCALE);
-                        ui.label("Want color do you want to play as?");
-                        if ui.button("White").clicked() {
-                            self.server_color = Some(chess_network_protocol::Color::Black);
-                        }
-                        if ui.button("Black").clicked() {
-                            self.server_color = Some(chess_network_protocol::Color::White);
-                        }
-                    });
+                    },
+                    TcpToGame::State { .. } => unreachable!(),
+                    TcpToGame::Error { .. } => unreachable!(),
                 }
             }
-            else {
-                if !self.tcp_started {
-                    self.tcp_started = true;
-                    
-                    let (server_sender, server_receiver) = std::sync::mpsc::channel();
-                    let (game_sender, game_receiver) = std::sync::mpsc::channel();
-                    
-                    self.server_receiver = Some(server_receiver);
-                    self.server_sender = Some(game_sender);
-
-                    thread::spawn(move || server::run(server_sender, game_receiver));
-                }
-                else {
-                    if self.server_color.is_none() {
-                        egui::Area::new("").show(&gui_ctx, |ui| {
-                            //gui_ctx.set_pixels_per_point(UI_SCALE);
-                            ui.label("Waiting for client to connect...");
-                        });
-                    }
-                    if let Ok(state) = self.server_receiver.as_mut().unwrap().try_recv() {
-                        match state {
-                            server::ServerToGame::Handshake { game, server_color } => {
-                                self.server_color = Some(server_color);
-                                self.game = game;
-                            },
-                            server::ServerToGame::State { game, turn, move_made, joever } => {
-                                self.game = game;
-                                self.last_move = Some(move_made.into_chess());
-                                self.decision = joever.into_chess();
-                            },
-                            server::ServerToGame::Error { error } => {
-                                self.text = Text::new(
-                                    format!("Move error: {}", explain_move_error(error)))
-                            },
-                        }
-                    }
-                }
+            println!("{:?}", self.server_color);
+            if self.is_server.unwrap() {
+                egui::Area::new("").show(&gui_ctx, |ui| {
+                    ui.label("Waiting for client to connect...");
+                });
             }
         }
-        else {
+        else if self.receiver.is_none() {
             egui::Area::new("").show(&gui_ctx, |ui| {
-                //gui_ctx.set_pixels_per_point(UI_SCALE);
                 ui.label("Want to start a session as server or client?");
-                if ui.button("Server").clicked() {
-                    self.is_server = Some(true);
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.is_server, 
+                        Some(true), 
+                        "Server"
+                    );
+                    ui.selectable_value(
+                        &mut self.is_server, 
+                        Some(false), 
+                        "Client"
+                    );
+                });
+    
+                if Some(false) == self.is_server {
+                    ui.label("Want color do you want to play as?");
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(
+                            &mut self.server_color, 
+                            Some(Color::White), 
+                            "White"
+                        );
+                        ui.selectable_value(
+                            &mut self.server_color, 
+                            Some(Color::Black), 
+                            "Black"
+                        );
+                    });
                 }
-                if ui.button("Client").clicked() {
-                    self.is_server = Some(false);
-                }
+    
+                ui.add_enabled_ui(
+                    self.server_color.is_some() || Some(true) == self.is_server, 
+                    |ui| {
+                        if ui.button("Connect").clicked() {
+                            let (tcp_sender, tcp_receiver) = std::sync::mpsc::channel();
+                            let (game_sender, game_receiver) = std::sync::mpsc::channel();
+    
+                            if Some(true) == self.is_server {
+                                thread::spawn(move || server::run(tcp_sender, game_receiver));
+                            } else {
+                                let temp = self.server_color.unwrap();
+    
+                                thread::spawn(move || client::run(
+                                    tcp_sender, 
+                                    game_receiver, 
+                                    temp));
+                            }
+    
+                            self.receiver = Some(tcp_receiver);
+                            self.sender = Some(game_sender);
+                        }
+                });
             });
         }
 
@@ -231,34 +236,34 @@ impl event::EventHandler<ggez::GameError> for MainState {
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let mut canvas = graphics::Canvas::from_frame(
             ctx,
-            Color::BLACK,
+            graphics::Color::BLACK,
         );
 
-        if let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
+        if self.tcp_started && let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
 
             let white_square = graphics::Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::fill(),
                 Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                Color::WHITE,
+                graphics::Color::WHITE,
             )?;
             let black_square = graphics::Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::fill(),
                 Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                Color::from_rgb(180, 135, 103,),
+                graphics::Color::from_rgb(180, 135, 103,),
             )?;
             let white_selected_square = graphics::Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::fill(),
                 Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                Color::from_rgb(207, 209, 134)
+                graphics::Color::from_rgb(207, 209, 134)
             )?;
             let black_selected_square = graphics::Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::fill(),
                 Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                Color::from_rgb(170, 162, 87)
+                graphics::Color::from_rgb(170, 162, 87)
             )?;
 
             let mut selected_image: &graphics::Image = &self.pawn_image_w;
@@ -276,7 +281,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     let pos_unit = Vec2::new(x as f32, y as f32);
                     let selected = 
                         (self.selected == Some(pos_unit) 
-                            && self.game.board[y][x].is_some())
+                            && self.board[y][x] != Piece::None)
                         || (pos_unit == last_move_pos_from 
                             || pos_unit == last_move_pos_to);
                     
@@ -297,24 +302,30 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         }
                     }
 
-                    let image = match self.game.board[y][x] {
-                        Some( Piece { piece: PieceType::Pawn, color: redkar_chess::Color::White } ) => &self.pawn_image_w,
-                        Some( Piece { piece: PieceType::Pawn, color: redkar_chess::Color::Black } ) => &self.pawn_image_b,
-                        Some( Piece { piece: PieceType::King, color: redkar_chess::Color::White } ) => &self.king_image_w,
-                        Some( Piece { piece: PieceType::King, color: redkar_chess::Color::Black } ) => &self.king_image_b,
-                        Some( Piece { piece: PieceType::Queen, color: redkar_chess::Color::White } ) => &self.queen_image_w,
-                        Some( Piece { piece: PieceType::Queen, color: redkar_chess::Color::Black } ) => &self.queen_image_b,
-                        Some( Piece { piece: PieceType::Bishop, color: redkar_chess::Color::White } ) => &self.bishop_image_w,
-                        Some( Piece { piece: PieceType::Bishop, color: redkar_chess::Color::Black } ) => &self.bishop_image_b,
-                        Some( Piece { piece: PieceType::Knight, color: redkar_chess::Color::White } ) => &self.knight_image_w,
-                        Some( Piece { piece: PieceType::Knight, color: redkar_chess::Color::Black } ) => &self.knight_image_b,
-                        Some( Piece { piece: PieceType::Rook, color: redkar_chess::Color::White } ) => &self.rook_image_w,
-                        Some( Piece { piece: PieceType::Rook, color: redkar_chess::Color::Black } ) => &self.rook_image_b,
-                        None => continue,
+                    let image = match self.board[y][x] {
+                        Piece::WhitePawn => &self.pawn_image_w,
+                        Piece::BlackPawn => &self.pawn_image_b,
+                        Piece::WhiteKing => &self.king_image_w,
+                        Piece::BlackKing => &self.king_image_b,
+                        Piece::WhiteQueen => &self.queen_image_w,
+                        Piece::BlackQueen => &self.queen_image_b,
+                        Piece::WhiteBishop => &self.bishop_image_w,
+                        Piece::BlackBishop => &self.bishop_image_b,
+                        Piece::WhiteKnight => &self.knight_image_w,
+                        Piece::BlackKnight => &self.knight_image_b,
+                        Piece::WhiteRook => &self.rook_image_w,
+                        Piece::BlackRook => &self.rook_image_b,
+                        Piece::None => continue,
                     };
 
-                    if self.selected == Some(pos_unit) && self.game.board[y][x].is_some() {
-                        relative_pos = pos + Vec2::new(self.pos_x - self.start_x, self.pos_y - self.start_y);
+                    if self.selected == Some(pos_unit) && self.board[y][x] != Piece::None {
+                        if !((server_color == &self.turn) ^ (Some(self.turn) == piece_color(&self.board[pos_unit.y as usize][pos_unit.x as usize]))) {
+                            relative_pos = pos + Vec2::new(self.pos_x - self.start_x, self.pos_y - self.start_y);
+                        }
+                        else {
+                            relative_pos = pos
+                        }
+
                         selected_image = image;
                     }
                     else {
@@ -325,7 +336,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 }
             }
 
-            if self.selected.is_some() {
+            if let Some(selected) = self.selected {
                 canvas.draw(selected_image, graphics::DrawParam::new()
                     .dest(relative_pos)
                     .scale(Vec2::new(0.75, 0.75)));
@@ -346,17 +357,21 @@ impl event::EventHandler<ggez::GameError> for MainState {
             canvas.draw(&self.controls_text, controls_text_pos);
             canvas.draw(&self.text, text_pos);
 
-            if let Some(r) = &self.decision {
+            if &self.joever != &Joever::Ongoing {
                 let mut text = Text::new("");
-                match r {
-                    Decision::Black => {
+                match &self.joever {
+                    Joever::Black => {
                         text = Text::new("Black won!");
                     },
-                    Decision::White => {
+                    Joever::White => {
                         text = Text::new("White won!");
                     },
-                    Decision::Tie => {
+                    Joever::Draw => {
                         text = Text::new("Draw!");
+                    },
+                    Joever::Ongoing => { },
+                    Joever::Indeterminate => {
+                        text = Text::new("Indeterminate!");
                     },
                 }
                 
@@ -397,14 +412,21 @@ impl event::EventHandler<ggez::GameError> for MainState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        if self.decision.is_none() {
-            if let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
-                let y_c = y_colored(is_server, server_color, (y as f32 / SQUARE_SIZE).floor() as usize);
-                self.start_x = x;
-                self.start_y = y;
-                self.selected = Some(Vec2::new((x / SQUARE_SIZE).floor(), y_c as f32));
+        if self.tcp_started && let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color && x < 8.0 * SQUARE_SIZE && y < 8.0 * SQUARE_SIZE {
+            let y_c = y_colored(is_server, server_color, (y as f32 / SQUARE_SIZE).floor() as usize);
+            let temp = Some(Vec2::new((x / SQUARE_SIZE).floor(), y_c as f32));
+
+            if self.joever != Joever::Ongoing {
+                self.selected = None;
+                return Ok(());
             }
+            
+            self.start_x = x;
+            self.start_y = y;
+            self.selected = temp;
+            return Ok(());
         }
+        self.selected = None;
         Ok(())
     }
 
@@ -415,67 +437,87 @@ impl event::EventHandler<ggez::GameError> for MainState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        if self.decision.is_some() {
+        if self.joever != Joever::Ongoing 
+            || !self.tcp_started 
+            || x > 8.0 * SQUARE_SIZE 
+            || y > 8.0 * SQUARE_SIZE 
+            || self.selected.is_none() 
+        {
+            self.selected = None;
             return Ok(());
         }
 
-        if let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
+        if let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color && let Some(selected) = self.selected {
             let y_c = y_colored(is_server, server_color, (y as f32 / SQUARE_SIZE).floor() as usize);
 
             let mv = Move { 
-                start_x: self.selected.unwrap().x as usize, 
-                start_y: self.selected.unwrap().y as usize, 
+                start_x: selected.x as usize, 
+                start_y: selected.y as usize, 
                 end_x: (x / SQUARE_SIZE).floor() as usize, 
-                end_y: (y / SQUARE_SIZE).floor() as usize
+                end_y: y_c,
+                promotion: Piece::None,
             };
 
-            if self.selected != Some(Vec2::new((x / SQUARE_SIZE).floor(), y_c as f32)) {
-                if let Some(sender) = &self.client_sender {
-                    sender.send(client::GameToClient {
-                        move_made: chess_move_to_move(mv),
-                    }).unwrap();
-                }
-                if let Some(sender) = &self.server_sender {
-                    sender.send(server::GameToServer {
-                        move_made: chess_move_to_move(mv),
-                    }).unwrap();
-                }
-                /*match self.game.do_move(mv) {
-                    Ok(result) => {
-                        self.text = Text::new(
-                            format!("{:?} moved {:?} from {} to {}",
-                                self.game.turn, 
-                                self.game.board[self.selected.unwrap().y as usize][self.selected.unwrap().x as usize],
-                                cords_to_square(self.selected.unwrap().x, self.selected.unwrap().y), 
-                                cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor())
-                            ));
-
-                        self.last_move = Some(mv);
-
-                        self.decision = result;
-                    },
-                    Err(e) => self.text = Text::new(
-                        format!("Move error: {}", explain_move_error(e)))
-                }*/
+            if your_turn(&self.turn, server_color, is_server) || (Some(self.turn) == piece_color(&self.board[selected.y as usize][selected.x as usize])) {
+                return Ok(());
             }
 
+            if let Some(sender) = &self.sender {
+                sender.send(mv).unwrap();
+            }
+            if let Some(receiver) = &self.receiver {
+                match receiver.recv().unwrap() {
+                    TcpToGame::State { board, moves, joever, move_made, turn } => {
+                        self.board = board;
+                        self.last_move = Some(move_made);
+                        self.joever = joever;
+                        self.text = Text::new(
+                            format!("{:?} moved {:?} from {} to {}",
+                                self.turn, 
+                                self.board[selected.y as usize][selected.x as usize],
+                                cords_to_square(selected.x, selected.y), 
+                                cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()
+                            )));
+                    },
+                    TcpToGame::Error { message } => {
+                        self.text = Text::new(
+                            format!("Move error: {}", message))
+                    },
+                    TcpToGame::Handshake { .. } => unreachable!(),
+                }
+            }
             self.selected = None;
         }
-
         Ok(())
     }
 }
 
-fn explain_move_error(e: MoveError) -> String {
-    match e {
-        MoveError::NoPiece => "There is no piece at the given position".to_string(),
-        MoveError::WrongColorPiece => "The piece at the given position is not the same color as the current player".to_string(),
-        MoveError::OutsideBoard => "The given position is outside the board".to_string(),
-        MoveError::FriendlyFire => "You can't capture your own pieces".to_string(),
-        MoveError::BlockedPath => "The path to the given position is blocked".to_string(),
-        MoveError::SelfCheck => "You can't put yourself in check".to_string(),
-        MoveError::Movement => "The piece can't move like that".to_string(),
-        MoveError::Mated => "You are in checkmate".to_string(),
+fn your_turn(turn: &Color, server_color: &Color, is_server: bool) -> bool {
+    (turn != server_color) ^ is_server
+}
+
+fn oposite_color(color: &Color) -> Color {
+    match color {
+        Color::White => Color::Black,
+        Color::Black => Color::White,
+    }
+}
+
+fn piece_color(piece: &Piece) -> Option<Color> {
+    match piece {
+        Piece::WhitePawn => Some(Color::White),
+        Piece::BlackPawn => Some(Color::Black),
+        Piece::WhiteKing => Some(Color::White),
+        Piece::BlackKing => Some(Color::Black),
+        Piece::WhiteQueen => Some(Color::White),
+        Piece::BlackQueen => Some(Color::Black),
+        Piece::WhiteBishop => Some(Color::White),
+        Piece::BlackBishop => Some(Color::Black),
+        Piece::WhiteKnight => Some(Color::White),
+        Piece::BlackKnight => Some(Color::Black),
+        Piece::WhiteRook => Some(Color::White),
+        Piece::BlackRook => Some(Color::Black),
+        Piece::None => None,
     }
 }
 
@@ -489,6 +531,7 @@ fn y_colored(is_server: bool, server_color: &chess_network_protocol::Color, y: u
         else { y },
     }
 }
+
 fn cords_to_square(x: f32, y: f32) -> String {
     let t = match x as u8 {
         0 => "a".to_string(),

@@ -1,43 +1,15 @@
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
 use chess_network_protocol::*;
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, Receiver};
 
 use redkar_chess::Game;
+use crate::{redkar_chess_utils::*, TcpToGame};
 
 pub const FEATURES: Vec<Features> = vec![];
 
-use crate::redkar_chess_utils::*;
-
-pub enum ServerToGame {
-    Handshake {
-        game: Game,
-        server_color: Color,
-    },
-    State {
-        game: Game,
-        turn: Color,
-        move_made: Move,
-        joever: Joever,
-    },
-    Error {
-        error: redkar_chess::MoveError,
-    },
-}
-
-pub struct GameToServer {
-    pub move_made: Move,
-}
-
-fn switch_turn(turn: Color) -> Color {
-    match turn {
-        Color::White => Color::Black,
-        Color::Black => Color::White,
-    }
-}
-
-pub fn run(sender: Sender<ServerToGame>, receiver: Receiver<GameToServer>) {
+pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
     let listener = TcpListener::bind("127.0.0.1:5000").unwrap();
 
     // accept connections and process them serially
@@ -50,8 +22,10 @@ pub fn run(sender: Sender<ServerToGame>, receiver: Receiver<GameToServer>) {
 
     let mut game = Game::new_game();
 
-    sender.send(ServerToGame::Handshake {
-        game: game,
+    sender.send(TcpToGame::Handshake {
+        board: game.board.into_network(),
+        moves: vec![],
+        features: FEATURES,
         server_color: deserialized.server_color,
     }).unwrap();
 
@@ -65,10 +39,8 @@ pub fn run(sender: Sender<ServerToGame>, receiver: Receiver<GameToServer>) {
     //send
     serde_json::to_writer(&stream, &handshake).unwrap();
 
-    let mut turn = deserialized.server_color.clone();
-
-    if turn == Color::White {
-        turn = make_move(sender, &receiver, turn, &stream, &mut game)
+    if deserialized.server_color == Color::White {
+        make_move(sender.clone(), &receiver, &stream, &mut game)
     }
 
     loop {
@@ -80,9 +52,10 @@ pub fn run(sender: Sender<ServerToGame>, receiver: Receiver<GameToServer>) {
             ClientToServer::Move(move_made) => {
                 match game.do_move(move_made.into_chess()) {
                     Ok(d) => {
-                        sender.send(ServerToGame::State {
-                            game: game.clone(),
-                            turn: turn.clone(),
+                        sender.send(TcpToGame::State {
+                            board: game.board.into_network(),
+                            moves: vec![],
+                            turn: game.turn.into_network(),
                             move_made: move_made,
                             joever: d.into_network(),
                         }).unwrap();
@@ -95,14 +68,18 @@ pub fn run(sender: Sender<ServerToGame>, receiver: Receiver<GameToServer>) {
                         };
 
                         //send
-                        serde_json::to_writer(stream, &state).unwrap();
-
-                        turn = switch_turn(turn)
+                        serde_json::to_writer(&stream, &state).unwrap();
                     }
                     Err(e) => {
-                        sender.send(ServerToGame::Error {
-                            error: e,
-                        }).unwrap();
+                        let state = ServerToClient::Error {
+                            board: game.board.into_network(),
+                            moves: vec![],
+                            joever: Joever::Ongoing,
+                            message: crate::explain_move_error(e),
+                        };
+
+                        //send
+                        serde_json::to_writer(&stream, &state).unwrap();
                     }
                 }
             },
@@ -110,19 +87,20 @@ pub fn run(sender: Sender<ServerToGame>, receiver: Receiver<GameToServer>) {
             ClientToServer::Draw => { panic!("Draw not implemented") }
         }
 
-        turn = make_move(sender.clone(), &receiver, turn, &stream, &mut game)
+        make_move(sender.clone(), &receiver, &stream, &mut game);
     }
 }
 
-fn make_move(sender: Sender<ServerToGame>, receiver: &Receiver<GameToServer>, turn: Color, stream: &TcpStream, game: &mut Game) -> Color {
+fn make_move(sender: Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &TcpStream, game: &mut Game) {
     let move_made = receiver.recv().unwrap();
 
-    match game.do_move(move_made.move_made.into_chess()) {
+    match game.do_move(move_made.into_chess()) {
         Ok(d) => {
-            sender.send(ServerToGame::State {
-                game: game.clone(),
-                move_made: move_made.move_made,
-                turn: turn.clone(),
+            sender.send(TcpToGame::State {
+                board: game.board.into_network(),
+                moves: vec![],
+                turn: game.turn.into_network(),
+                move_made: move_made,
                 joever: d.into_network(),
             }).unwrap();
 
@@ -130,19 +108,15 @@ fn make_move(sender: Sender<ServerToGame>, receiver: &Receiver<GameToServer>, tu
                 board: game.board.into_network(),
                 moves: vec![],
                 joever: d.into_network(),
-                move_made: move_made.move_made,
+                move_made: move_made,
             };
 
             //send
             serde_json::to_writer(stream, &state).unwrap();
-
-            switch_turn(turn)
         }
         Err(e) => {
-            sender.send(ServerToGame::Error {
-                error: e,
-            }).unwrap();
-            make_move(sender, receiver, turn, stream, game)
+            sender.send(TcpToGame::Error { message: explain_move_error(e) }).unwrap();
+            make_move(sender, receiver, stream, game);
         }
     }
 }
