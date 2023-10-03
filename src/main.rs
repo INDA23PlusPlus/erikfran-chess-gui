@@ -10,6 +10,8 @@ use chess_network_protocol;
 
 use redkar_chess::*;
 
+mod redkar_chess_utils;
+
 use core::fmt;
 use std::fmt::Display;
 use std::sync::mpsc::{Receiver, Sender};
@@ -19,31 +21,14 @@ use std::{env, path, thread};
 use ggegui::{egui, Gui};
 use ggegui::egui::{TextStyle::*, FontId, FontFamily::Proportional};
 
+use crate::redkar_chess_utils::*;
+
 const SCALE: f32 = 0.75;
 const SQUARE_SIZE: f32 = 130.0 * SCALE;
 const TEXT_SIZE: f32 = 25.0 * SCALE;
 const SIDEBAR_SIZE: f32 = 400.0;
 const UI_SCALE: f32 = 10.0;
 const FONT_SIZE: f32 = 32.0;
-
-fn chess_move_to_move(chess_move: redkar_chess::Move) -> chess_network_protocol::Move {
-    chess_network_protocol::Move {
-        start_x: chess_move.start_x,
-        start_y: chess_move.start_y,
-        end_x: chess_move.end_x,
-        end_y: chess_move.end_y,
-        promotion: chess_network_protocol::Piece::None,
-    }
-}
-
-fn network_move_to_move(chess_move: chess_network_protocol::Move) -> Move {
-    Move {
-        start_x: chess_move.start_x,
-        start_y: chess_move.start_y,
-        end_x: chess_move.end_x,
-        end_y: chess_move.end_y,
-    }
-}
 
 struct MainState {
     pawn_image_w: graphics::Image,
@@ -207,9 +192,21 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         });
                     }
                     if let Ok(state) = self.server_receiver.as_mut().unwrap().try_recv() {
-                        self.server_color = Some(state.server_color.clone());
-                        self.last_move = Some(network_move_to_move(state.move_made.clone()));
-                        self.game = state.game.clone();
+                        match state {
+                            server::ServerToGame::Handshake { game, server_color } => {
+                                self.server_color = Some(server_color);
+                                self.game = game;
+                            },
+                            server::ServerToGame::State { game, turn, move_made, joever } => {
+                                self.game = game;
+                                self.last_move = Some(move_made.into_chess());
+                                self.decision = joever.into_chess();
+                            },
+                            server::ServerToGame::Error { error } => {
+                                self.text = Text::new(
+                                    format!("Move error: {}", explain_move_error(error)))
+                            },
+                        }
                     }
                 }
             }

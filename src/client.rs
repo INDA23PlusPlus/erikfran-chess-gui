@@ -1,12 +1,9 @@
 use serde::{Serialize, Deserialize};
 use chess_network_protocol::*;
+use serde_json::de::IoRead;
 
-use std::io::prelude::*;
 use std::net::TcpStream;
 use std::sync::mpsc::{Sender, Receiver};
-use std::sync::{Arc, Mutex};
-
-use crate::server;
 
 pub enum ClientToGame {
     Move {
@@ -21,17 +18,20 @@ pub enum ClientToGame {
         moves: Vec<Move>,
         features: Vec<Features>,
         turn: Color,
+        joever: Joever,
+    },
+    Error {
+        board: [[Piece; 8]; 8],
+        moves: Vec<Move>,
+        joever: Joever,
+        message: String,
+        turn: Color,
     },
 }
 
 pub struct GameToClient {
     pub move_made: Move,
 }
-
-trait Switch {
-    fn switch_turn(&mut self);
-}
-
 
 fn switch_turn(turn: Color) -> Color {
     match turn {
@@ -45,7 +45,7 @@ pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, serve
     let mut de = serde_json::Deserializer::from_reader(&stream);
 
     let handshake = ClientToServerHandshake {
-        server_color: server_color,
+        server_color: server_color.clone(),
     };
 
     //send
@@ -55,22 +55,18 @@ pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, serve
     let deserialized = ServerToClientHandshake::deserialize(&mut de).unwrap();
     println!("Recieved: {:?}", deserialized);
 
-    let mut turn = switch_turn(server_color);
+    let mut turn = switch_turn(server_color.clone());
 
     sender.send(ClientToGame::Handshake {
         board: deserialized.board,
         moves: deserialized.moves,
         features: deserialized.features,
-        turn: turn,
+        joever: deserialized.joever,
+        turn: turn.clone(),
     }).unwrap();
 
-    if turn == Color::White {
-        let move_made = receiver.recv().unwrap();
-
-        let mv = ClientToServer::Move(move_made.move_made);
-
-        //send
-        serde_json::to_writer(&stream, &mv).unwrap();
+    if &turn == &Color::White {
+        turn = make_move(sender.clone(), &receiver, turn, &stream);
     }
 
     loop {
@@ -83,44 +79,58 @@ pub fn run(sender: Sender<ClientToGame>, receiver: Receiver<GameToClient>, serve
                     board, 
                     moves, 
                     joever, 
-                    move_made: move_made, 
-                    turn,
+                    move_made, 
+                    turn: turn.clone(),
                 }).unwrap();
+                
+                turn = switch_turn(turn);
             },
-            ServerToClient::MoveRequested => {
-                let move_made = receiver.recv().unwrap();
-
-                //send
-                serde_json::to_writer(&stream, &move_made).unwrap();
-            },
-            ServerToClient::GameEnded => {
-                break;
-            },
+            ServerToClient::Error { .. } => { panic!("Error cant happen here") },
+            ServerToClient::Draw { board, moves } => {panic!("Draw not implemented")},
+            ServerToClient::Resigned { board, joever } => {panic!("Resigned not implemented")},
         }
 
-        let move_made = receiver.recv().unwrap();
-
-        //send
-        serde_json::to_writer(&stream, &move_made).unwrap();
+        turn = make_move(sender.clone(), &receiver, turn, &stream);
     }
+}
 
-    //assumes that the client is white
-    let moved = ClientToServer::Move(Move { 
-        start_x: 0, 
-        start_y: 0, 
-        end_x: 1, 
-        end_y: 1, 
-        promotion: Piece::None, 
-    });
+fn make_move(sender: Sender<ClientToGame>, receiver: &Receiver<GameToClient>, turn: Color, stream: &TcpStream) -> Color {
+    let mut de = serde_json::Deserializer::from_reader(stream);
+    
+    let move_made = receiver.recv().unwrap();
+
+    let mv = ClientToServer::Move(move_made.move_made);
 
     //send
-    serde_json::to_writer(&stream, &moved).unwrap();
+    serde_json::to_writer(stream, &mv).unwrap();
 
-    //receive
     let deserialized = ServerToClient::deserialize(&mut de).unwrap();
     println!("Recieved: {:?}", deserialized);
 
-    //receive
-    let deserialized = ServerToClient::deserialize(&mut de).unwrap();
-    println!("Recieved: {:?}", deserialized);
+    match deserialized {
+        ServerToClient::State { board, moves, joever, move_made } => {
+            sender.send(ClientToGame::Move { 
+                board, 
+                moves, 
+                joever, 
+                move_made, 
+                turn: turn.clone(),
+            }).unwrap();
+            
+            return switch_turn(turn);
+        },
+        ServerToClient::Error { board, moves, joever, message } => {
+            sender.send(ClientToGame::Error { 
+                board, 
+                moves, 
+                joever, 
+                turn: turn.clone(),
+                message
+            }).unwrap();
+
+            return make_move(sender, receiver, turn, stream);
+        },
+        ServerToClient::Draw { board, moves } => {panic!("Draw not implemented")},
+        ServerToClient::Resigned { board, joever } => {panic!("Resigned not implemented")},
+    }
 }
