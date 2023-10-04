@@ -151,6 +151,29 @@ impl MainState {
 impl event::EventHandler<ggez::GameError> for MainState {
 	fn update(&mut self, ctx: &mut Context) -> GameResult {
         let gui_ctx = self.gui.ctx();
+
+        if self.tcp_started && let Some(receiver) = &self.receiver {
+            if let Ok(message) = receiver.try_recv() {
+                match message {
+                    TcpToGame::Handshake { .. } => unreachable!(),
+                    TcpToGame::State { board, moves, joever, move_made, turn } => {
+                        self.board = board;
+                        self.moves = moves;
+                        self.last_move = Some(move_made);
+                        self.joever = joever;
+                        self.turn = turn;
+                        self.text = Text::new(
+                            format!("{:?} moved {:?} from {} to {}",
+                                self.turn, 
+                                self.board[move_made.end_y][move_made.end_x],
+                                cords_to_square(move_made.start_x as f32, move_made.start_y as f32), 
+                                cords_to_square(move_made.end_x as f32, move_made.end_y as f32)
+                            ));
+                    },
+                    TcpToGame::Error { .. } => unreachable!(),
+                }
+            }
+        }
         if let Some(receiver) = &self.receiver && !self.tcp_started {
             if let Ok(message) = receiver.try_recv() {
                 match message {
@@ -193,12 +216,12 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     ui.horizontal(|ui| {
                         ui.selectable_value(
                             &mut self.server_color, 
-                            Some(Color::White), 
+                            Some(Color::Black), 
                             "White"
                         );
                         ui.selectable_value(
                             &mut self.server_color, 
-                            Some(Color::Black), 
+                            Some(Color::White), 
                             "Black"
                         );
                     });
@@ -240,6 +263,13 @@ impl event::EventHandler<ggez::GameError> for MainState {
         );
 
         if self.tcp_started && let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
+
+            if your_turn(&self.turn, server_color, is_server) {
+                println!("Your turn! is_server: {}, server_color: {:?}, turn: {:?}", is_server, server_color, self.turn);
+            }
+            else {
+                println!("Opponents turn! is_server: {}, server_color: {:?}, turn: {:?}", is_server, server_color, self.turn);
+            }
 
             let white_square = graphics::Mesh::new_rectangle(
                 ctx,
@@ -319,7 +349,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     };
 
                     if self.selected == Some(pos_unit) && self.board[y][x] != Piece::None {
-                        if !((server_color == &self.turn) ^ (Some(self.turn) == piece_color(&self.board[pos_unit.y as usize][pos_unit.x as usize]))) {
+                        if your_turn(&self.turn, server_color, is_server) &&  {
                             relative_pos = pos + Vec2::new(self.pos_x - self.start_x, self.pos_y - self.start_y);
                         }
                         else {
@@ -458,7 +488,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 promotion: Piece::None,
             };
 
-            if your_turn(&self.turn, server_color, is_server) || (Some(self.turn) == piece_color(&self.board[selected.y as usize][selected.x as usize])) {
+            if !your_turn(&self.turn, server_color, is_server) {
                 return Ok(());
             }
 
