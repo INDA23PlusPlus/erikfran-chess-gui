@@ -7,7 +7,7 @@ use std::sync::mpsc::{Sender, Receiver};
 
 use crate::TcpToGame;
 
-fn switch_turn(turn: Color) -> Color {
+fn switch_turn(turn: &Color) -> Color {
     match turn {
         Color::White => Color::Black,
         Color::Black => Color::White,
@@ -29,7 +29,7 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Co
     let deserialized = ServerToClientHandshake::deserialize(&mut de).unwrap();
     println!("Recieved: {:?}", deserialized);
 
-    let mut turn = switch_turn(server_color.clone());
+    let mut turn = switch_turn(&server_color);
 
     sender.send(TcpToGame::Handshake {
         board: deserialized.board,
@@ -48,6 +48,8 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Co
 
         match deserialized {
             ServerToClient::State { board, moves, joever, move_made } => {
+                turn = switch_turn(&turn);
+
                 sender.send(TcpToGame::State { 
                     board, 
                     moves, 
@@ -55,8 +57,6 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Co
                     move_made, 
                     turn: turn.clone(),
                 }).unwrap();
-                
-                turn = switch_turn(turn);
             },
             ServerToClient::Error { .. } => { panic!("Error cant happen here") },
             ServerToClient::Draw { board, moves } => {panic!("Draw not implemented")},
@@ -87,10 +87,10 @@ fn make_move(sender: Sender<TcpToGame>, receiver: &Receiver<Move>, turn: Color, 
                 moves, 
                 joever, 
                 move_made, 
-                turn: turn.clone(),
+                turn: switch_turn(&turn),
             }).unwrap();
             
-            return switch_turn(turn);
+            return switch_turn(&turn);
         },
         ServerToClient::Error { board, moves, joever, message } => {
             sender.send(TcpToGame::Error { message }).unwrap();

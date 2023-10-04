@@ -161,7 +161,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         self.moves = moves;
                         self.last_move = Some(move_made);
                         self.joever = joever;
-                        self.turn = turn;
                         self.text = Text::new(
                             format!("{:?} moved {:?} from {} to {}",
                                 self.turn, 
@@ -169,6 +168,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                                 cords_to_square(move_made.start_x as f32, move_made.start_y as f32), 
                                 cords_to_square(move_made.end_x as f32, move_made.end_y as f32)
                             ));
+                        self.turn = turn;
                     },
                     TcpToGame::Error { .. } => unreachable!(),
                 }
@@ -504,10 +504,12 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         self.text = Text::new(
                             format!("{:?} moved {:?} from {} to {}",
                                 self.turn, 
-                                self.board[selected.y as usize][selected.x as usize],
-                                cords_to_square(selected.x, selected.y), 
+                                self.board[move_made.end_y][move_made.end_x],
+                                cords_to_square(move_made.start_x as f32, move_made.start_y as f32), 
                                 cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()
                             )));
+                        self.turn = turn;
+                        self.moves = moves;
                     },
                     TcpToGame::Error { message } => {
                         self.text = Text::new(
