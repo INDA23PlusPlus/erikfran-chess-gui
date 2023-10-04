@@ -18,7 +18,6 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
 
     //receive
     let deserialized = ClientToServerHandshake::deserialize(&mut de).unwrap();
-    println!("Received: {:?}", deserialized);
 
     let mut game = Game::new_game();
 
@@ -40,58 +39,65 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
     serde_json::to_writer(&stream, &handshake).unwrap();
 
     if &deserialized.server_color == &Color::White {
-        make_move(sender.clone(), &receiver, &stream, &mut game)
+        make_move(&sender, &receiver, &stream, &mut game)
     }
 
     loop {
-        //receive
-        let deserialized = ClientToServer::deserialize(&mut de).unwrap();
-        println!("Received: {:?}", deserialized);
+        client_move(&sender, &receiver, &stream, &mut game);
 
-        match deserialized {
-            ClientToServer::Move(move_made) => {
-                match game.do_move(move_made.into_chess()) {
-                    Ok(d) => {
-                        sender.send(TcpToGame::State {
-                            board: game.board.into_network(),
-                            moves: vec![],
-                            turn: game.turn.into_network(),
-                            move_made: move_made,
-                            joever: d.into_network(),
-                        }).unwrap();
-
-                        let state = ServerToClient::State {
-                            board: game.board.into_network(),
-                            moves: vec![],
-                            joever: d.into_network(),
-                            move_made: move_made,
-                        };
-
-                        //send
-                        serde_json::to_writer(&stream, &state).unwrap();
-                    }
-                    Err(e) => {
-                        let state = ServerToClient::Error {
-                            board: game.board.into_network(),
-                            moves: vec![],
-                            joever: Joever::Ongoing,
-                            message: crate::explain_move_error(e),
-                        };
-
-                        //send
-                        serde_json::to_writer(&stream, &state).unwrap();
-                    }
-                }
-            },
-            ClientToServer::Resign => { panic!("Resign not implemented") }
-            ClientToServer::Draw => { panic!("Draw not implemented") }
-        }
-
-        make_move(sender.clone(), &receiver, &stream, &mut game);
+        make_move(&sender, &receiver, &stream, &mut game);
     }
 }
 
-fn make_move(sender: Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &TcpStream, game: &mut Game) {
+fn client_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &TcpStream, game: &mut Game) {
+    let mut de = serde_json::Deserializer::from_reader(stream);
+
+    //receive
+    let deserialized = ClientToServer::deserialize(&mut de).unwrap();
+
+    match deserialized {
+        ClientToServer::Move(move_made) => {
+            match game.do_move(move_made.into_chess()) {
+                Ok(d) => {
+                    sender.send(TcpToGame::State {
+                        board: game.board.into_network(),
+                        moves: vec![],
+                        turn: game.turn.into_network(),
+                        move_made: move_made,
+                        joever: d.into_network(),
+                    }).unwrap();
+
+                    let state = ServerToClient::State {
+                        board: game.board.into_network(),
+                        moves: vec![],
+                        joever: d.into_network(),
+                        move_made: move_made,
+                    };
+
+                    //send
+                    serde_json::to_writer(stream, &state).unwrap();
+                }
+                Err(e) => {
+                    let state = ServerToClient::Error {
+                        board: game.board.into_network(),
+                        moves: vec![],
+                        joever: Joever::Ongoing,
+                        message: crate::explain_move_error(e),
+                    };
+
+                    //send
+                    serde_json::to_writer(stream, &state).unwrap();
+
+                    client_move(sender, receiver, stream, game)
+                }
+            }
+        },
+        ClientToServer::Resign => { panic!("Resign not implemented") }
+        ClientToServer::Draw => { panic!("Draw not implemented") }
+    }
+}
+
+fn make_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &TcpStream, game: &mut Game) {
     let move_made = receiver.recv().unwrap();
 
     match game.do_move(move_made.into_chess()) {

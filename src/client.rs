@@ -27,9 +27,8 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Co
 
     //receive
     let deserialized = ServerToClientHandshake::deserialize(&mut de).unwrap();
-    println!("Recieved: {:?}", deserialized);
 
-    let mut turn = switch_turn(&server_color);
+    let mut turn = Color::White;
 
     sender.send(TcpToGame::Handshake {
         board: deserialized.board,
@@ -38,13 +37,12 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Co
         server_color: server_color.clone(),
     }).unwrap();
 
-    if &turn == &Color::White {
+    if crate::your_turn(&turn, &server_color, false) {
         turn = make_move(sender.clone(), &receiver, turn, &stream);
     }
 
     loop {
         let deserialized = ServerToClient::deserialize(&mut de).unwrap();
-        println!("Recieved: {:?}", deserialized);
 
         match deserialized {
             ServerToClient::State { board, moves, joever, move_made } => {
@@ -71,14 +69,11 @@ fn make_move(sender: Sender<TcpToGame>, receiver: &Receiver<Move>, turn: Color, 
     let mut de = serde_json::Deserializer::from_reader(stream);
     
     let move_made = receiver.recv().unwrap();
-
     let mv = ClientToServer::Move(move_made);
 
     //send
     serde_json::to_writer(stream, &mv).unwrap();
-
     let deserialized = ServerToClient::deserialize(&mut de).unwrap();
-    println!("Recieved: {:?}", deserialized);
 
     match deserialized {
         ServerToClient::State { board, moves, joever, move_made } => {

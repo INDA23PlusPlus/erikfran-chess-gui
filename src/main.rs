@@ -21,8 +21,9 @@ const SCALE: f32 = 0.75;
 const SQUARE_SIZE: f32 = 130.0 * SCALE;
 const TEXT_SIZE: f32 = 25.0 * SCALE;
 const SIDEBAR_SIZE: f32 = 400.0;
-const UI_SCALE: f32 = 10.0;
+const UI_SCALE: f32 = 1.0;
 const FONT_SIZE: f32 = 32.0;
+const DRAG_SENSITIVITY: f32 = 25.0;
 
 pub enum TcpToGame {
     Handshake {
@@ -58,7 +59,16 @@ struct MainState {
     knight_image_b: graphics::Image,
     rook_image_w: graphics::Image,
     rook_image_b: graphics::Image,
+    white_square: graphics::Mesh,
+    black_square: graphics::Mesh,
+    white_moved_square: graphics::Mesh,
+    black_moved_square: graphics::Mesh,
+    white_selected_square: graphics::Mesh,
+    black_selected_square: graphics::Mesh,
+    white_moving_square: graphics::Mesh,
+    black_moving_square: graphics::Mesh,
     selected: Option<Vec2>,
+    dragging: bool,
     start_x: f32,
     start_y: f32,
     pos_x: f32,
@@ -94,6 +104,55 @@ impl MainState {
         let rook_image_w = graphics::Image::from_path(ctx, "/rook-w.png")?;
         let rook_image_b = graphics::Image::from_path(ctx, "/rook-b.png")?;
 
+        let white_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(240, 217, 181),
+        )?;
+        let black_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(180, 135, 103,),
+        )?;
+        let white_moved_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(207, 209, 134)
+        )?;
+        let black_moved_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(170, 162, 87)
+        )?;
+        let white_selected_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(129,150,105)
+        )?;
+        let black_selected_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(100,109,64)
+        )?;
+        let white_moving_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(174, 177, 136)
+        )?;
+        let black_moving_square = graphics::Mesh::new_rectangle(
+            ctx,
+            graphics::DrawMode::fill(),
+            Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
+            graphics::Color::from_rgb(133, 120, 78)
+        )?;
+
         let mut controls_text = Text::new("Controls:\n\nHold left click and drag to move a piece and just release left click on the destination square to make the move.");
         controls_text.set_scale(PxScale::from(TEXT_SIZE));
 
@@ -123,7 +182,16 @@ impl MainState {
             knight_image_b,
             rook_image_w,
             rook_image_b,
+            white_square,
+            black_square,
+            white_moved_square,
+            black_moved_square,
+            white_selected_square,
+            black_selected_square,
+            white_moving_square,
+            black_moving_square,
             selected: None,
+            dragging: false,
             start_x: 0.0,
             start_y: 0.0,
             pos_x: 0.0,
@@ -169,6 +237,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
                                 cords_to_square(move_made.end_x as f32, move_made.end_y as f32)
                             ));
                         self.turn = turn;
+                        self.selected = None;
+                        self.dragging = false;
                     },
                     TcpToGame::Error { .. } => unreachable!(),
                 }
@@ -188,7 +258,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     TcpToGame::Error { .. } => unreachable!(),
                 }
             }
-            println!("{:?}", self.server_color);
+
             if self.is_server.unwrap() {
                 egui::Area::new("").show(&gui_ctx, |ui| {
                     ui.label("Waiting for client to connect...");
@@ -264,40 +334,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
         if self.tcp_started && let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
 
-            if your_turn(&self.turn, server_color, is_server) {
-                println!("Your turn! is_server: {}, server_color: {:?}, turn: {:?}", is_server, server_color, self.turn);
-            }
-            else {
-                println!("Opponents turn! is_server: {}, server_color: {:?}, turn: {:?}", is_server, server_color, self.turn);
-            }
-
-            let white_square = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                graphics::Color::WHITE,
-            )?;
-            let black_square = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                graphics::Color::from_rgb(180, 135, 103,),
-            )?;
-            let white_selected_square = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                graphics::Color::from_rgb(207, 209, 134)
-            )?;
-            let black_selected_square = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-                graphics::Color::from_rgb(170, 162, 87)
-            )?;
-
-            let mut selected_image: &graphics::Image = &self.pawn_image_w;
-            let mut relative_pos: Vec2 = Vec2::new(0.0, 0.0);
+            let mut selected_image: Option<&graphics::Image> = None;
 
             let (last_move_pos_from, last_move_pos_to) = match self.last_move {
                 Some(mv) => (Vec2::new(mv.start_x as f32, mv.start_y as f32), Vec2::new(mv.end_x as f32, mv.end_y as f32)),
@@ -310,25 +347,45 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     let pos = Vec2::new(x as f32 * SQUARE_SIZE, y_c as f32 * SQUARE_SIZE);
                     let pos_unit = Vec2::new(x as f32, y as f32);
                     let selected = 
-                        (self.selected == Some(pos_unit) 
-                            && self.board[y][x] != Piece::None)
-                        || (pos_unit == last_move_pos_from 
-                            || pos_unit == last_move_pos_to);
+                        self.selected == Some(pos_unit);
+
+                    let moved = 
+                        pos_unit == last_move_pos_from 
+                        || pos_unit == last_move_pos_to;
+
+                    let moving = 
+                        (self.pos_x / SQUARE_SIZE).floor() == pos_unit.x
+                        && y_colored(is_server, server_color, (self.pos_y / SQUARE_SIZE).floor() as usize) == pos_unit.y as usize
+                        && self.selected.is_some()
+                        && piece_color(&self.board[y][x]) != Some(your_color(server_color, is_server))
+                        && your_turn(&self.turn, server_color, is_server);
                     
                     if (x + y_c) % 2 == 0 {
                         if selected {
-                            canvas.draw(&black_selected_square, pos);
+                            canvas.draw(&self.white_selected_square, pos);
+                        }
+                        else if moving {
+                            canvas.draw(&self.white_moving_square, pos);
+                        }
+                        else if moved {
+                            canvas.draw(&self.white_moved_square, pos);
                         }
                         else {
-                            canvas.draw(&black_square, pos);
+                            canvas.draw(&self.white_square, pos);
                         }
                     } 
                     else {
                         if selected {
-                            canvas.draw(&white_selected_square, pos);
+                            canvas.draw(&self.black_selected_square, pos);
+                        }
+                        else if moving {
+                            canvas.draw(&self.black_moving_square, pos);
+                        }
+                        else if moved {
+                            canvas.draw(&self.black_moved_square, pos);
                         }
                         else {
-                            canvas.draw(&white_square, pos);
+                            canvas.draw(&self.black_square, pos);
                         }
                     }
 
@@ -348,15 +405,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         Piece::None => continue,
                     };
 
-                    if self.selected == Some(pos_unit) && self.board[y][x] != Piece::None {
-                        if your_turn(&self.turn, server_color, is_server) && Some(your_color(server_color, is_server)) == piece_color(&self.board[y][x]) {
-                            relative_pos = pos + Vec2::new(self.pos_x - self.start_x, self.pos_y - self.start_y);
-                        }
-                        else {
-                            relative_pos = pos
-                        }
-
-                        selected_image = image;
+                    if self.selected == Some(pos_unit) && self.dragging && your_turn(&self.turn, server_color, is_server) && Some(your_color(server_color, is_server)) == piece_color(&self.board[y][x]) {
+                        selected_image = Some(image);
                     }
                     else {
                         canvas.draw(image, graphics::DrawParam::new()
@@ -366,9 +416,9 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 }
             }
 
-            if let Some(selected) = self.selected {
+            if let Some(selected_image) = selected_image {
                 canvas.draw(selected_image, graphics::DrawParam::new()
-                    .dest(relative_pos)
+                    .dest(Vec2::new(self.pos_x - SQUARE_SIZE / 2.0, self.pos_y - SQUARE_SIZE / 2.0))
                     .scale(Vec2::new(0.75, 0.75)));
             }
 
@@ -414,8 +464,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
         }
 
         canvas.draw(&self.gui, DrawParam::default()
-            .dest(glam::Vec2::ZERO)
-            .scale([UI_SCALE, UI_SCALE]));
+            .dest(Vec2::new(0.0, 0.0)));
 
         canvas.finish(ctx)?;
         Ok(())
@@ -423,12 +472,15 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
     fn mouse_motion_event(
         &mut self,
-        _ctx: &mut Context,
+        ctx: &mut Context,
         x: f32,
         y: f32,
         xrel: f32,
         yrel: f32,
     ) -> GameResult {
+        if (x - self.start_x).abs() + (y - self.start_y).abs() > DRAG_SENSITIVITY && ctx.mouse.button_pressed(MouseButton::Left) {
+            self.dragging = true;
+        }
         self.pos_x = x;
         self.pos_y = y;
 
@@ -442,11 +494,22 @@ impl event::EventHandler<ggez::GameError> for MainState {
         x: f32,
         y: f32,
     ) -> GameResult {
-        if self.tcp_started && let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color && x < 8.0 * SQUARE_SIZE && y < 8.0 * SQUARE_SIZE {
+        if self.tcp_started 
+            && let Some(is_server) = self.is_server 
+            && let Some(server_color) = &self.server_color 
+            && x < 8.0 * SQUARE_SIZE 
+            && y < 8.0 * SQUARE_SIZE 
+            && button == MouseButton::Left 
+            {
             let y_c = y_colored(is_server, server_color, (y as f32 / SQUARE_SIZE).floor() as usize);
             let temp = Some(Vec2::new((x / SQUARE_SIZE).floor(), y_c as f32));
+            
+            if piece_color(&self.board[y_c as usize][temp.unwrap().x as usize]) != Some(your_color(server_color, is_server)) {
+                return Ok(());
+            }
 
-            if self.joever != Joever::Ongoing {
+            if self.joever != Joever::Ongoing 
+                || self.selected == temp {
                 self.selected = None;
                 return Ok(());
             }
@@ -467,6 +530,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
         x: f32,
         y: f32,
     ) -> GameResult {
+        self.dragging = false;
+
         if self.joever != Joever::Ongoing 
             || !self.tcp_started 
             || x > 8.0 * SQUARE_SIZE 
@@ -488,7 +553,9 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 promotion: Piece::None,
             };
 
-            if !your_turn(&self.turn, server_color, is_server) {
+            if !your_turn(&self.turn, server_color, is_server) 
+                || Some(oposite_color(&your_color(server_color, is_server))) == piece_color(&self.board[selected.y as usize][selected.x as usize])
+                || (mv.end_x == mv.start_x && mv.end_y == mv.start_y) {
                 return Ok(());
             }
 
@@ -510,10 +577,14 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             )));
                         self.turn = turn;
                         self.moves = moves;
+                        self.selected = None;
+                        self.dragging = false;
                     },
                     TcpToGame::Error { message } => {
                         self.text = Text::new(
-                            format!("Move error: {}", message))
+                            format!("Move error: {}", message));
+                        self.selected = None;
+                        self.dragging = false;
                     },
                     TcpToGame::Handshake { .. } => unreachable!(),
                 }
