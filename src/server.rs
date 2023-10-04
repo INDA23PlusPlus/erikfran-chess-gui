@@ -26,7 +26,7 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
         board: game.board.into_network(),
         moves: vec![],
         features: FEATURES,
-        server_color: deserialized.server_color,
+        server_color: deserialized.server_color.clone(),
     }).unwrap();
 
     let handshake = ServerToClientHandshake {
@@ -39,7 +39,7 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
     //send
     serde_json::to_writer(&stream, &handshake).unwrap();
 
-    if deserialized.server_color == Color::White {
+    if &deserialized.server_color == &Color::White {
         make_move(sender.clone(), &receiver, &stream, &mut game)
     }
 

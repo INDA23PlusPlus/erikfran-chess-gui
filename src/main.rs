@@ -237,7 +237,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             if Some(true) == self.is_server {
                                 thread::spawn(move || server::run(tcp_sender, game_receiver));
                             } else {
-                                let temp = self.server_color.unwrap();
+                                let temp = self.server_color.clone().unwrap();
     
                                 thread::spawn(move || client::run(
                                     tcp_sender, 
@@ -349,7 +349,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     };
 
                     if self.selected == Some(pos_unit) && self.board[y][x] != Piece::None {
-                        if your_turn(&self.turn, server_color, is_server) &&  {
+                        if your_turn(&self.turn, server_color, is_server) && Some(your_color(server_color, is_server)) == piece_color(&self.board[y][x]) {
                             relative_pos = pos + Vec2::new(self.pos_x - self.start_x, self.pos_y - self.start_y);
                         }
                         else {
@@ -519,6 +519,15 @@ impl event::EventHandler<ggez::GameError> for MainState {
             self.selected = None;
         }
         Ok(())
+    }
+}
+
+fn your_color(server_color: &Color, is_server: bool) -> Color {
+    if is_server {
+        server_color.clone()
+    }
+    else {
+        oposite_color(server_color)
     }
 }
 
