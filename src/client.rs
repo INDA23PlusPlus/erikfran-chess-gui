@@ -14,8 +14,8 @@ fn switch_turn(turn: &Color) -> Color {
     }
 }
 
-pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Color) {
-    let stream = TcpStream::connect("127.0.0.1:5000").unwrap();
+pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Color, ip: String) {
+    let stream = TcpStream::connect(ip).unwrap();
     let mut de = serde_json::Deserializer::from_reader(&stream);
 
     let handshake = ClientToServerHandshake {
@@ -56,7 +56,7 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Co
                     turn: turn.clone(),
                 }).unwrap();
             },
-            ServerToClient::Error { .. } => { panic!("Error cant happen here") },
+            ServerToClient::Error { .. } => { unreachable!() },
             ServerToClient::Draw { board, moves } => {panic!("Draw not implemented")},
             ServerToClient::Resigned { board, joever } => {panic!("Resigned not implemented")},
         }
@@ -87,7 +87,7 @@ fn make_move(sender: Sender<TcpToGame>, receiver: &Receiver<Move>, turn: Color, 
             
             return switch_turn(&turn);
         },
-        ServerToClient::Error { board, moves, joever, message } => {
+        ServerToClient::Error { message, .. } => {
             sender.send(TcpToGame::Error { message }).unwrap();
 
             return make_move(sender, receiver, turn, stream);

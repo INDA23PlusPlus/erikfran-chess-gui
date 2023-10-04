@@ -4,13 +4,12 @@ use chess_network_protocol::*;
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, Receiver};
 
-use redkar_chess::Game;
-use crate::{redkar_chess_utils::*, TcpToGame};
+use crate::{redkar_chess_utils::Game, TcpToGame};
 
 pub const FEATURES: Vec<Features> = vec![];
 
-pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
-    let listener = TcpListener::bind("127.0.0.1:5000").unwrap();
+pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, ip: String) {
+    let listener = TcpListener::bind(ip).unwrap();
 
     // accept connections and process them serially
     let (stream, _addr) = listener.accept().unwrap();
@@ -19,10 +18,10 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
     //receive
     let deserialized = ClientToServerHandshake::deserialize(&mut de).unwrap();
 
-    let mut game = Game::new_game();
+    let mut game = Game::new();
 
     sender.send(TcpToGame::Handshake {
-        board: game.board.into_network(),
+        board: game.board,
         moves: vec![],
         features: FEATURES,
         server_color: deserialized.server_color.clone(),
@@ -30,7 +29,7 @@ pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>) {
 
     let handshake = ServerToClientHandshake {
         features: FEATURES,
-        board: game.board.into_network(),
+        board: game.board,
         moves: vec![],
         joever: Joever::Ongoing,
     };
@@ -57,20 +56,21 @@ fn client_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &T
 
     match deserialized {
         ClientToServer::Move(move_made) => {
-            match game.do_move(move_made.into_chess()) {
-                Ok(d) => {
+            match game.try_move(move_made) {
+                Ok(()) => {
+                    let moves = game.possible_moves();
                     sender.send(TcpToGame::State {
-                        board: game.board.into_network(),
-                        moves: vec![],
-                        turn: game.turn.into_network(),
+                        board: game.board,
+                        moves: moves.clone(),
+                        turn: game.turn,
                         move_made: move_made,
-                        joever: d.into_network(),
+                        joever: game.joever,
                     }).unwrap();
 
                     let state = ServerToClient::State {
-                        board: game.board.into_network(),
-                        moves: vec![],
-                        joever: d.into_network(),
+                        board: game.board,
+                        moves: moves,
+                        joever: game.joever,
                         move_made: move_made,
                     };
 
@@ -79,10 +79,10 @@ fn client_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &T
                 }
                 Err(e) => {
                     let state = ServerToClient::Error {
-                        board: game.board.into_network(),
-                        moves: vec![],
+                        board: game.board,
+                        moves: game.possible_moves(),
                         joever: Joever::Ongoing,
-                        message: crate::explain_move_error(e),
+                        message: e,
                     };
 
                     //send
@@ -100,28 +100,29 @@ fn client_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &T
 fn make_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &TcpStream, game: &mut Game) {
     let move_made = receiver.recv().unwrap();
 
-    match game.do_move(move_made.into_chess()) {
-        Ok(d) => {
+    match game.try_move(move_made) {
+        Ok(()) => {
+            let moves = game.possible_moves();
             sender.send(TcpToGame::State {
-                board: game.board.into_network(),
-                moves: vec![],
-                turn: game.turn.into_network(),
+                board: game.board,
+                moves: moves.clone(),
+                turn: game.turn,
                 move_made: move_made,
-                joever: d.into_network(),
+                joever: game.joever,
             }).unwrap();
 
             let state = ServerToClient::State {
-                board: game.board.into_network(),
-                moves: vec![],
-                joever: d.into_network(),
+                board: game.board,
+                moves: moves,
+                joever: game.joever,
                 move_made: move_made,
             };
 
             //send
             serde_json::to_writer(stream, &state).unwrap();
         }
-        Err(e) => {
-            sender.send(TcpToGame::Error { message: explain_move_error(e) }).unwrap();
+        Err(message) => {
+            sender.send(TcpToGame::Error { message }).unwrap();
             make_move(sender, receiver, stream, game);
         }
     }

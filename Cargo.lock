@@ -82,6 +82,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "alvinw-chess"
+version = "0.1.0"
+source = "git+https://github.com/INDA23PlusPlus/alvinw-chess#e3f7ee69d0032c79ae798a9eaff0e29db2f2e18b"
+
+[[package]]
 name = "android-activity"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -393,6 +398,7 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 [[package]]
 name = "chess-network-protocol"
 version = "0.1.0"
+source = "git+https://github.com/INDA23PlusPlus/chess-network-protocol#2374674692a83450550264dfa8c1c2e164ed9712"
 dependencies = [
  "serde",
  "serde_json",
@@ -734,6 +740,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 name = "erikfran-chess-gui"
 version = "0.1.0"
 dependencies = [
+ "alvinw-chess",
  "chess-network-protocol",
  "ggegui",
  "ggez",

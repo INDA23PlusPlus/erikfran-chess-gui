@@ -1,16 +1,17 @@
 #![feature(let_chains)]
 use ggez::event::MouseButton;
 use ggez::{event, conf};
-use ggez::graphics::{self, Rect, Text, PxScale, DrawParam};
+use ggez::graphics::{self, Rect, Text, PxScale, DrawParam, TextFragment};
 use ggez::{Context, GameResult, glam};
 use ggez::glam::*;
 
 use chess_network_protocol;
 
 mod redkar_chess_utils;
+mod fritiofr_chess_utils;
 
 use std::sync::mpsc::{Receiver, Sender};
-use std::{env, path, thread};
+use std::{env, path, thread, cmp::Ord};
 
 use ggegui::{egui, Gui};
 
@@ -24,6 +25,8 @@ const SIDEBAR_SIZE: f32 = 400.0;
 const UI_SCALE: f32 = 1.0;
 const FONT_SIZE: f32 = 32.0;
 const DRAG_SENSITIVITY: f32 = 25.0;
+const CORD_OFFSET: f32 = 35.0;
+const CORD_FONT_SIZE: f32 = 30.0;
 
 pub enum TcpToGame {
     Handshake {
@@ -59,6 +62,8 @@ struct MainState {
     knight_image_b: graphics::Image,
     rook_image_w: graphics::Image,
     rook_image_b: graphics::Image,
+    white_rgb: graphics::Color,
+    black_rgb: graphics::Color,
     white_square: graphics::Mesh,
     black_square: graphics::Mesh,
     white_moved_square: graphics::Mesh,
@@ -87,6 +92,7 @@ struct MainState {
     moves: Vec<Move>,
     features: Vec<Features>,
     turn: Color,
+    ip: String,
 }
 
 impl MainState {
@@ -104,17 +110,20 @@ impl MainState {
         let rook_image_w = graphics::Image::from_path(ctx, "/rook-w.png")?;
         let rook_image_b = graphics::Image::from_path(ctx, "/rook-b.png")?;
 
+        let white_rgb: graphics::Color = graphics::Color::from_rgb(240, 217, 181);
+        let black_rgb: graphics::Color = graphics::Color::from_rgb(180, 135, 103);
+
         let white_square = graphics::Mesh::new_rectangle(
             ctx,
             graphics::DrawMode::fill(),
             Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-            graphics::Color::from_rgb(240, 217, 181),
+            white_rgb,
         )?;
         let black_square = graphics::Mesh::new_rectangle(
             ctx,
             graphics::DrawMode::fill(),
             Rect::new(0.0, 0.0, SQUARE_SIZE, SQUARE_SIZE),
-            graphics::Color::from_rgb(180, 135, 103,),
+            black_rgb,
         )?;
         let white_moved_square = graphics::Mesh::new_rectangle(
             ctx,
@@ -182,6 +191,8 @@ impl MainState {
             knight_image_b,
             rook_image_w,
             rook_image_b,
+            white_rgb,
+            black_rgb,
             white_square,
             black_square,
             white_moved_square,
@@ -210,6 +221,7 @@ impl MainState {
             moves: vec![],
             features: vec![],
             turn: Color::White,
+            ip: "127.0.0.1:8384".to_string(),
         };
 
         Ok(s)
@@ -260,13 +272,13 @@ impl event::EventHandler<ggez::GameError> for MainState {
             }
 
             if self.is_server.unwrap() {
-                egui::Area::new("").show(&gui_ctx, |ui| {
+                egui::Area::new("").movable(false).show(&gui_ctx, |ui| {
                     ui.label("Waiting for client to connect...");
                 });
             }
         }
         else if self.receiver.is_none() {
-            egui::Area::new("").show(&gui_ctx, |ui| {
+            egui::Area::new("").movable(false).show(&gui_ctx, |ui| {
                 ui.label("Want to start a session as server or client?");
                 ui.horizontal(|ui| {
                     ui.selectable_value(
@@ -296,6 +308,10 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         );
                     });
                 }
+
+                ui.label("What is the IP of your opponent?");
+                ui.add(egui::TextEdit::singleline(&mut self.ip).hint_text("127.0.0.1:8384"));
+
     
                 ui.add_enabled_ui(
                     self.server_color.is_some() || Some(true) == self.is_server, 
@@ -303,16 +319,20 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         if ui.button("Connect").clicked() {
                             let (tcp_sender, tcp_receiver) = std::sync::mpsc::channel();
                             let (game_sender, game_receiver) = std::sync::mpsc::channel();
+
+                            let temp_ip = self.ip.clone();
     
                             if Some(true) == self.is_server {
-                                thread::spawn(move || server::run(tcp_sender, game_receiver));
+                                thread::spawn(move || server::run(tcp_sender, game_receiver, temp_ip));
                             } else {
                                 let temp = self.server_color.clone().unwrap();
+                                let temp_ip = self.ip.clone();
     
                                 thread::spawn(move || client::run(
                                     tcp_sender, 
                                     game_receiver, 
-                                    temp));
+                                    temp,
+                                    temp_ip));
                             }
     
                             self.receiver = Some(tcp_receiver);
@@ -344,7 +364,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
             for x in 0..8 {
                 for y in 0..8 {
                     let y_c = y_colored(is_server, server_color, y);
-                    let pos = Vec2::new(x as f32 * SQUARE_SIZE, y_c as f32 * SQUARE_SIZE);
+                    let x_c = x_colored(is_server, server_color, x);
+                    let pos = Vec2::new(x_c as f32 * SQUARE_SIZE, y_c as f32 * SQUARE_SIZE);
                     let pos_unit = Vec2::new(x as f32, y as f32);
                     let selected = 
                         self.selected == Some(pos_unit);
@@ -352,15 +373,18 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     let moved = 
                         pos_unit == last_move_pos_from 
                         || pos_unit == last_move_pos_to;
-
+                    
                     let moving = 
-                        (self.pos_x / SQUARE_SIZE).floor() == pos_unit.x
+                        x_colored(is_server, server_color, (self.pos_x / SQUARE_SIZE).floor() as usize) == pos_unit.x as usize
                         && y_colored(is_server, server_color, (self.pos_y / SQUARE_SIZE).floor() as usize) == pos_unit.y as usize
                         && self.selected.is_some()
                         && piece_color(&self.board[y][x]) != Some(your_color(server_color, is_server))
                         && your_turn(&self.turn, server_color, is_server);
+
+/*                     let text_pos_y = Vec2::new((x as f32 + 1.0) * SQUARE_SIZE - CORD_OFFSET, 8.0 * SQUARE_SIZE - CORD_OFFSET);
+                    let text_pos_x = Vec2::new(0.0, y as f32 * SQUARE_SIZE); */
                     
-                    if (x + y_c) % 2 == 0 {
+                    if (x_c + y_c) % 2 == 0 {
                         if selected {
                             canvas.draw(&self.white_selected_square, pos);
                         }
@@ -373,6 +397,22 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         else {
                             canvas.draw(&self.white_square, pos);
                         }
+/*                         if y == 7 {
+                            let mut text = Text::new(TextFragment::new(cord_to_file(x as f32))
+                                .color(self.white_rgb));
+                            let _ = text.set_scale(CORD_FONT_SIZE);
+                            
+                            let text_pos = text_pos_y;
+                            canvas.draw(&text, text_pos);
+                        }
+                        if x == 0 {
+                            let mut text = Text::new(TextFragment::new(y.to_string())
+                                .color(self.white_rgb));
+                            let _ = text.set_scale(CORD_FONT_SIZE);
+                            
+                            let text_pos = text_pos_x;
+                            canvas.draw(&text, text_pos);
+                        } */
                     } 
                     else {
                         if selected {
@@ -387,6 +427,22 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         else {
                             canvas.draw(&self.black_square, pos);
                         }
+/*                         if y == 7 {
+                            let mut text = Text::new(TextFragment::new(cord_to_file(x as f32))
+                                .color(self.black_rgb));
+                            let _ = text.set_scale(CORD_FONT_SIZE);
+                            
+                            let text_pos = text_pos_y;
+                            canvas.draw(&text, text_pos);
+                        }
+                        if x == 0 {
+                            let mut text = Text::new(TextFragment::new(y.to_string())
+                                .color(self.black_rgb));
+                            let _ = text.set_scale(CORD_FONT_SIZE);
+                            
+                            let text_pos = text_pos_x;
+                            canvas.draw(&text, text_pos);
+                        } */
                     }
 
                     let image = match self.board[y][x] {
@@ -499,12 +555,16 @@ impl event::EventHandler<ggez::GameError> for MainState {
             && let Some(server_color) = &self.server_color 
             && x < 8.0 * SQUARE_SIZE 
             && y < 8.0 * SQUARE_SIZE 
+            && x > 0.0
+            && y > 0.0
             && button == MouseButton::Left 
             {
             let y_c = y_colored(is_server, server_color, (y as f32 / SQUARE_SIZE).floor() as usize);
-            let temp = Some(Vec2::new((x / SQUARE_SIZE).floor(), y_c as f32));
+            let x_c = x_colored(is_server, server_color, (x as f32 / SQUARE_SIZE).floor() as usize);
+
+            let temp = Some(Vec2::new(x_c as f32, y_c as f32));
             
-            if piece_color(&self.board[y_c as usize][temp.unwrap().x as usize]) != Some(your_color(server_color, is_server)) {
+            if piece_color(&self.board[y_c as usize][x_c as usize]) != Some(your_color(server_color, is_server)) {
                 return Ok(());
             }
 
@@ -544,11 +604,12 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
         if let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color && let Some(selected) = self.selected {
             let y_c = y_colored(is_server, server_color, (y as f32 / SQUARE_SIZE).floor() as usize);
+            let x_c = x_colored(is_server, server_color, (x as f32 / SQUARE_SIZE).floor() as usize);
 
             let mv = Move { 
                 start_x: selected.x as usize, 
                 start_y: selected.y as usize, 
-                end_x: (x / SQUARE_SIZE).floor() as usize, 
+                end_x: x_c, 
                 end_y: y_c,
                 promotion: Piece::None,
             };
@@ -634,6 +695,7 @@ fn piece_color(piece: &Piece) -> Option<Color> {
 }
 
 fn y_colored(is_server: bool, server_color: &chess_network_protocol::Color, y: usize) -> usize {
+    let y = y.clamp(0, 7);
     match server_color {
         chess_network_protocol::Color::White => 
         if !is_server { y } 
@@ -644,8 +706,20 @@ fn y_colored(is_server: bool, server_color: &chess_network_protocol::Color, y: u
     }
 }
 
-fn cords_to_square(x: f32, y: f32) -> String {
-    let t = match x as u8 {
+fn x_colored(is_server: bool, server_color: &chess_network_protocol::Color, x: usize) -> usize {
+    let x = x.clamp(0, 7);
+    match server_color {
+        chess_network_protocol::Color::White => 
+        if is_server { x } 
+        else { 7 - x },
+        chess_network_protocol::Color::Black => 
+        if is_server { 7 - x } 
+        else { x },
+    }
+}
+
+fn cord_to_file(x: f32) -> String {
+    match x as u8 {
         0 => "a".to_string(),
         1 => "b".to_string(),
         2 => "c".to_string(),
@@ -655,15 +729,18 @@ fn cords_to_square(x: f32, y: f32) -> String {
         6 => "g".to_string(),
         7 => "h".to_string(),
         _ => unreachable!(),
-    };
+    }
+}
 
-    t + y.to_string().as_str()
+fn cords_to_square(x: f32, y: f32) -> String {
+    cord_to_file(x) + y.to_string().as_str()
 }
 
 mod client;
 mod server;
 
 pub fn main() -> GameResult {
+    std::env::set_var("RUST_BACKTRACE", "1");
     let resource_dir = if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
         let mut path = path::PathBuf::from(manifest_dir);
         path.push("resources");

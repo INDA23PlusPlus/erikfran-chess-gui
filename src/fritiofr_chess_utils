@@ -1,7 +1,5 @@
 use chess_network_protocol::*;
 
-use redkar_chess as chess;
-
 pub struct Game {
     pub board: [[Piece; 8]; 8],
     pub turn: Color,
@@ -12,23 +10,22 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        //this has king and queen position swaped because the deafult game has them swaped so i have to use fen but the fen implementation also swaps everything so i have to swap it back. aaaahhh
-        let game = chess::Game::game_from_fen("rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w KQkq - 0 1");
+        let game = chess::Game::new();
 
         Self {
             board: game.board.into_network(),
             turn: Color::White,
             joever: Joever::Ongoing,
-            features: vec![],
+            features: vec![Features::Castling, Features::PossibleMoveGeneration],
             game,
         }
     }
 
     pub fn try_move(&mut self, m: Move) -> Result<(), String> {
-        self.joever = match self.game.do_move(m.into_chess()) {
-            Ok(d) => d,
-            Err(e) => return Err(explain_move_error(e)),
-        }.into_network();
+        match self.game.try_move(m.into_chess()) {
+            Ok(()) => {},
+            Err(e) => return Err(format!("{e}")),
+        }
 
         self.board = self.game.board.into_network();
         self.turn = self.game.turn.into_network();
@@ -38,19 +35,6 @@ impl Game {
 
     pub fn possible_moves(&self) -> Vec<Move> {
         vec![]
-    }
-}
-
-pub fn explain_move_error(e: chess::MoveError) -> String {
-    match e {
-        chess::MoveError::NoPiece => "There is no piece at the given position".to_string(),
-        chess::MoveError::WrongColorPiece => "The piece at the given position is not the same color as the current player".to_string(),
-        chess::MoveError::OutsideBoard => "The given position is outside the board".to_string(),
-        chess::MoveError::FriendlyFire => "You can't capture your own pieces".to_string(),
-        chess::MoveError::BlockedPath => "The path to the given position is blocked".to_string(),
-        chess::MoveError::SelfCheck => "You can't put yourself in check".to_string(),
-        chess::MoveError::Movement => "The piece can't move like that".to_string(),
-        chess::MoveError::Mated => "You are in checkmate".to_string(),
     }
 }
 
@@ -64,12 +48,7 @@ pub trait IntoChess<T> {
 
 impl IntoChess<chess::Move> for Move {
     fn into_chess(self) -> chess::Move {
-        chess::Move {
-            start_x: self.start_x,
-            start_y: self.start_y,
-            end_x: self.end_x,
-            end_y: self.end_y,
-        }
+        if self
     }
 }
 
