@@ -2,16 +2,18 @@ use chess_network_protocol::*;
 
 use redkar_chess as chess;
 
+use crate::server::UniversalGame;
+
 pub struct Game {
-    pub board: [[Piece; 8]; 8],
-    pub turn: Color,
-    pub joever: Joever,
-    pub features: Vec<Features>,
+    board: [[Piece; 8]; 8],
+    turn: Color,
+    joever: Joever,
+    features: Vec<Features>,
     game: chess::Game,
 }
 
-impl Game {
-    pub fn new() -> Self {
+impl UniversalGame for Game {
+    fn new() -> Self {
         //this has king and queen position swaped because the deafult game has them swaped so i have to use fen but the fen implementation also swaps everything so i have to swap it back. aaaahhh
         let game = chess::Game::game_from_fen("rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w KQkq - 0 1");
 
@@ -24,7 +26,7 @@ impl Game {
         }
     }
 
-    pub fn try_move(&mut self, m: Move) -> Result<(), String> {
+    fn try_move(&mut self, m: Move) -> Result<(), String> {
         self.joever = match self.game.do_move(m.into_chess()) {
             Ok(d) => d,
             Err(e) => return Err(explain_move_error(e)),
@@ -36,8 +38,24 @@ impl Game {
         Ok(())
     }
 
-    pub fn possible_moves(&self) -> Vec<Move> {
+    fn possible_moves(&self) -> Vec<Move> {
         vec![]
+    }
+
+    fn board(&self) -> [[Piece; 8]; 8] {
+        self.board
+    }
+
+    fn turn(&self) -> Color {
+        self.turn.clone()
+    }
+
+    fn joever(&self) -> Joever {
+        self.joever
+    }
+
+    fn features(&self) -> Vec<Features> {
+        self.features.clone()
     }
 }
 
