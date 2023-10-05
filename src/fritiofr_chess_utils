@@ -1,5 +1,7 @@
 use chess_network_protocol::*;
 
+use fritiofr_chess as chess;
+
 pub struct Game {
     pub board: [[Piece; 8]; 8],
     pub turn: Color,
@@ -10,13 +12,13 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let game = chess::Game::new();
+        let game = chess::Game::start_pos();
 
         Self {
             board: game.board.into_network(),
             turn: Color::White,
             joever: Joever::Ongoing,
-            features: vec![Features::Castling, Features::PossibleMoveGeneration],
+            features: vec![Features::Castling, Features::EnPassant, Features::Promotion Features::PossibleMoveGeneration],
             game,
         }
     }
@@ -29,12 +31,29 @@ impl Game {
 
         self.board = self.game.board.into_network();
         self.turn = self.game.turn.into_network();
+        self.joever = self.game.is_checkmate;
 
         Ok(())
     }
 
     pub fn possible_moves(&self) -> Vec<Move> {
-        vec![]
+        match self.gen_all_moves() {
+            Some(m) => m.into_iter().map(|m| m.into_network()).collect(),
+            None => vec![],
+        }
+    }
+}
+
+pub fn explain_move_error(e: chess::MoveError) -> String {
+    match e {
+        chess::MoveError::NoPiece => "There is no piece at the given position".to_string(),
+        chess::MoveError::WrongColorPiece => "The piece at the given position is not the same color as the current player".to_string(),
+        chess::MoveError::OutsideBoard => "The given position is outside the board".to_string(),
+        chess::MoveError::FriendlyFire => "You can't capture your own pieces".to_string(),
+        chess::MoveError::BlockedPath => "The path to the given position is blocked".to_string(),
+        chess::MoveError::SelfCheck => "You can't put yourself in check".to_string(),
+        chess::MoveError::Movement => "The piece can't move like that".to_string(),
+        chess::MoveError::Mated => "You are in checkmate".to_string(),
     }
 }
 

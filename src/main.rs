@@ -8,7 +8,7 @@ use ggez::glam::*;
 use chess_network_protocol;
 
 mod redkar_chess_utils;
-mod fritiofr_chess_utils;
+//mod fritiofr_chess_utils;
 
 use std::sync::mpsc::{Receiver, Sender};
 use std::{env, path, thread, cmp::Ord};
@@ -323,7 +323,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             let temp_ip = self.ip.clone();
     
                             if Some(true) == self.is_server {
-                                thread::spawn(move || server::run(tcp_sender, game_receiver, temp_ip));
+                                thread::spawn(move || server::run(tcp_sender, game_receiver, /* temp_ip */));
                             } else {
                                 let temp = self.server_color.clone().unwrap();
                                 let temp_ip = self.ip.clone();
@@ -332,7 +332,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                                     tcp_sender, 
                                     game_receiver, 
                                     temp,
-                                    temp_ip));
+                                    "130.237.72.200:8384".to_string()));
                             }
     
                             self.receiver = Some(tcp_receiver);

@@ -742,6 +742,7 @@ version = "0.1.0"
 dependencies = [
  "alvinw-chess",
  "chess-network-protocol",
+ "fritiofr_chess",
  "ggegui",
  "ggez",
  "redkar-chess",
@@ -842,6 +843,14 @@ name = "foreign-types-shared"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
+
+[[package]]
+name = "fritiofr_chess"
+version = "0.1.1"
+source = "git+https://github.com/INDA23PlusPlus/fritiofr-chess#e52c4953889d1ab079b5379475bddc53e7039629"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "getrandom"

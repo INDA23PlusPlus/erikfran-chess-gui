@@ -9,6 +9,7 @@ edition = "2021"
 redkar-chess = { git = "https://github.com/INDA23PlusPlus/redkar-chess" }
 #chess = { git = "https://github.com/INDA23PlusPlus/erikfran-chess" }
 alvinw-chess = { git = "https://github.com/INDA23PlusPlus/alvinw-chess" }
+fritiofr_chess = { git = "https://github.com/INDA23PlusPlus/fritiofr-chess"}
 #redkar-chess = { git = "https://github.com/ErikFrankling/redkar-chess" }
 ggez = "0.9.3"
 serde = { version = "1.0", features = ["derive"] }

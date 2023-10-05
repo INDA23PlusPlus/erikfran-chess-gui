@@ -8,8 +8,8 @@ use crate::{redkar_chess_utils::Game, TcpToGame};
 
 pub const FEATURES: Vec<Features> = vec![];
 
-pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, ip: String) {
-    let listener = TcpListener::bind(ip).unwrap();
+pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>/* , ip: String */) {
+    let listener = TcpListener::bind("127.0.0.1:8384").unwrap();
 
     // accept connections and process them serially
     let (stream, _addr) = listener.accept().unwrap();
@@ -62,7 +62,7 @@ fn client_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &T
                     sender.send(TcpToGame::State {
                         board: game.board,
                         moves: moves.clone(),
-                        turn: game.turn,
+                        turn: game.turn.clone(),
                         move_made: move_made,
                         joever: game.joever,
                     }).unwrap();
@@ -106,7 +106,7 @@ fn make_move(sender: &Sender<TcpToGame>, receiver: &Receiver<Move>, stream: &Tcp
             sender.send(TcpToGame::State {
                 board: game.board,
                 moves: moves.clone(),
-                turn: game.turn,
+                turn: game.turn.clone(),
                 move_made: move_made,
                 joever: game.joever,
             }).unwrap();
