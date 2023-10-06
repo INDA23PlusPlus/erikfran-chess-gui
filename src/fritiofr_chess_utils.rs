@@ -50,10 +50,22 @@ impl UniversalGame for Game {
     }
 
     fn possible_moves(&self) -> Vec<Move> {
-        match self.game.gen_all_moves() {
-            Some(m) => m.into_iter().map(|m| m.into_network()).collect(),
-            None => vec![],
+        let mut moves = vec![];
+
+        for y in 0..8 {
+            for x in 0..8 {
+                let mut temp: Vec<Move> = match self.game.gen_moves(x, y) {
+                    Some(m) => {
+                        m.into_iter().map(|m| m.into_network()).collect()
+                    },
+                    None => vec![],
+                };
+
+                moves.append(&mut temp);
+            }
         }
+
+        moves
     }
 
     fn board(&self) -> [[Piece; 8]; 8] {
@@ -164,14 +176,14 @@ impl IntoNetwork<Move> for chess::Move {
         match self {
             chess::Move::Quiet { from, to } => Move {
                 start_x: from.0,
-                start_y: from.1,
+                start_y: 7 - from.1,
                 end_x: to.0,
                 end_y: to.1,
                 promotion: Piece::None,
             },
             chess::Move::Capture { from, to, .. } => Move {
                 start_x: from.0,
-                start_y: from.1,
+                start_y: 7 - from.1,
                 end_x: to.0,
                 end_y: to.1,
                 promotion: Piece::None,
@@ -185,7 +197,7 @@ impl IntoNetwork<Move> for chess::Move {
 
                 Move {
                     start_x: from.0,
-                    start_y: from.1,
+                    start_y: 7 - from.1,
                     end_x: to.0,
                     end_y: to.1,
                     promotion: promotion.into_network(&color),
@@ -200,7 +212,7 @@ impl IntoNetwork<Move> for chess::Move {
 
                 Move {
                     start_x: from.0,
-                    start_y: from.1,
+                    start_y: 7 - from.1,
                     end_x: to.0,
                     end_y: to.1,
                     promotion: promotion.into_network(&color),
@@ -209,7 +221,7 @@ impl IntoNetwork<Move> for chess::Move {
             chess::Move::Castle { from, to, .. } => {
                 Move {
                     start_x: from.0,
-                    start_y: from.1,
+                    start_y: 7 - from.1,
                     end_x: to.0,
                     end_y: to.1,
                     promotion: Piece::None,
@@ -218,7 +230,7 @@ impl IntoNetwork<Move> for chess::Move {
             chess::Move::DoublePawnPush { from, to } => {
                 Move {
                     start_x: from.0,
-                    start_y: from.1,
+                    start_y: 7 - from.1,
                     end_x: to.0,
                     end_y: to.1,
                     promotion: Piece::None,
@@ -290,11 +302,12 @@ impl IntoNetwork<[[Piece; 8]; 8]> for chess::Board {
     fn into_network(self) -> [[Piece; 8]; 8] {
         let mut new_board = [[Piece::None; 8]; 8];
 
-        for i in 0..8 {
+        for (k, i) in (0..8).rev().enumerate() {
             for j in 0..8 {
-                new_board[i][j] = self.get_tile(j, i).into_network();
+                new_board[i][j] = self.get_tile(j, k).into_network();
             }
         }
+        println!("{:?}", new_board);
         new_board
     }
 }

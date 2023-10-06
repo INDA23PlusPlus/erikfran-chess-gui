@@ -11,6 +11,7 @@ use server::UniversalGame;
 
 mod redkar_chess_utils;
 mod fritiofr_chess_utils;
+mod erikfran_chess_utils;
 
 use std::f32::consts::PI;
 use std::sync::mpsc::{Receiver, Sender};
