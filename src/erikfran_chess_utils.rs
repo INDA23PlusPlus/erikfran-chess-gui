@@ -203,7 +203,6 @@ impl IntoNetwork<[[Piece; 8]; 8]> for chess::util::Board {
                 new_board[y][x] = self[*rank][*file].into_network();
             }
         }
-        println!("{:?}", new_board);
         new_board
     }
 }

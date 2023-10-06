@@ -322,7 +322,6 @@ impl IntoNetwork<[[Piece; 8]; 8]> for chess::Board {
                 new_board[i][j] = self.get_tile(j, k).into_network();
             }
         }
-        println!("{:?}", new_board);
         new_board
     }
 }
