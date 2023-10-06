@@ -52,6 +52,20 @@ pub enum TcpToGame {
     Error {
         message: String,
     },
+    Draw {
+        board: [[Piece; 8]; 8],
+        moves: Vec<Move>,
+    },
+    Resigned {
+        board: [[Piece; 8]; 8],
+        joever: Joever,
+    },
+}
+
+pub enum GameToTcp {
+    Move(Move),
+    Draw,
+    Resign,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -103,7 +117,7 @@ struct MainState {
     server_color: Option<chess_network_protocol::Color>,
     tcp_started: bool,
     receiver: Option<Receiver<TcpToGame>>,
-    sender: Option<Sender<Move>>,
+    sender: Option<Sender<GameToTcp>>,
     board: [[Piece; 8]; 8],
     moves: Vec<Move>,
     features: Vec<Features>,
@@ -304,6 +318,37 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         self.dragging = false;
                     },
                     TcpToGame::Error { .. } => unreachable!(),
+                    TcpToGame::Draw { board, moves } => {
+                        self.board = board;
+                        self.moves = moves;
+                        self.joever = Joever::Draw;
+                        self.text = Text::new("Draw");
+                    },
+                    TcpToGame::Resigned { board, joever } => {
+                        self.board = board;
+                        self.joever = joever;
+                        self.text = Text::new("Resigned");
+                    },
+                }
+            }
+
+            if your_turn(&self.turn, &self.server_color.unwrap(), self.is_server.unwrap()) {
+                let mut draw = false;
+                let mut resign = false;
+                
+                egui::Area::new("").movable(false).show(&gui_ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Draw").clicked() {
+                            draw = true;
+                        }
+                        if ui.button("Resign").clicked() {
+                            resign = true;
+                        }
+                    });
+                });
+
+                if draw {
+                    self.sender.clone().unwrap().send(GameToTcp::Draw).unwrap();
                 }
             }
         }
@@ -335,6 +380,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     },
                     TcpToGame::State { .. } => unreachable!(),
                     TcpToGame::Error { .. } => unreachable!(),
+                    TcpToGame::Draw { .. } => unreachable!(),
+                    TcpToGame::Resigned { .. } => unreachable!(),
                 }
             }
 
@@ -766,7 +813,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
             }
 
             if let Some(sender) = &self.sender {
-                sender.send(mv).unwrap();
+                sender.send(GameToTcp::Move(mv)).unwrap();
             }
             if let Some(receiver) = &self.receiver {
                 match receiver.recv().unwrap() {
@@ -793,6 +840,17 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         self.dragging = false;
                     },
                     TcpToGame::Handshake { .. } => unreachable!(),
+                    TcpToGame::Draw { board, moves } => {
+                        self.board = board;
+                        self.moves = moves;
+                        self.joever = Joever::Draw;
+                        self.text = Text::new("Draw");
+                    },
+                    TcpToGame::Resigned { board, joever } => {
+                        self.board = board;
+                        self.joever = joever;
+                        self.text = Text::new("Resigned");
+                    },
                 }
             }
             self.selected = None;
