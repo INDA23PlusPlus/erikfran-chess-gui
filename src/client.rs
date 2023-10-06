@@ -15,7 +15,7 @@ fn switch_turn(turn: &Color) -> Color {
 }
 
 pub fn run(sender: Sender<TcpToGame>, receiver: Receiver<Move>, server_color: Color, ip: String) {
-    let stream = TcpStream::connect(ip).unwrap();
+    let stream = TcpStream::connect(ip + ":8384").unwrap();
     let mut de = serde_json::Deserializer::from_reader(&stream);
 
     let handshake = ClientToServerHandshake {

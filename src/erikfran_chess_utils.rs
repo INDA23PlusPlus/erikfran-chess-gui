@@ -17,7 +17,7 @@ impl UniversalGame for Game {
         let game = chess::Game::new();
 
         Self {
-            board: game.get_board().into_network(),
+            board: game.board.into_network(),
             turn: Color::White,
             joever: Joever::Ongoing,
             features: vec![Features::Castling, Features::PossibleMoveGeneration],
@@ -25,12 +25,28 @@ impl UniversalGame for Game {
         }
     }
 
-    fn try_move(&mut self, m: Move) -> Result<(), String> {
-        let chess_moves = self.possible_moves();
+    fn try_move(&mut self, mv: Move) -> Result<(), String> {
+        let mut moves = vec![];
 
-        let chess_move = match chess_moves.into_iter().find(|chess_move| chess_move.into_network() == m) {
+        for y in 0..8 {
+            for x in 0..8 {
+                if let Ok((m, castles)) = self.game.possible_moves(chess::util::Square::try_from((x, y)).unwrap(), true){
+                    for s in chess::util::get_square_array() {
+                        if let Some(mv) = m[s] {
+                            moves.push((mv, y as usize));
+                        }
+                    }
+    
+                    for c in castles {
+                        moves.push((c, y as usize));
+                    }
+                }
+            }
+        }
+
+        let (chess_move, _) = match moves.into_iter().find(|(chess_move, rank)| chess_move.into_network(*rank) == mv) {
             Some(m) => m,
-            None => return Err("THat move is not one of the generated possible moves".to_string()),
+            None => return Err("That move is not one of the generated possible moves".to_string()),
         };
 
         match self.game.try_move(chess_move) {
@@ -38,29 +54,30 @@ impl UniversalGame for Game {
             Err(e) => return Err(format!("{e}")),
         }
 
-        self.board = self.game.get_board().into_network();
-        self.turn = self.game.get_turn().into_network();
-        self.joever = self.game.is_checkmate().into_network(&self.turn);
+        self.board = self.game.board.into_network();
+        self.turn = self.game.turn.into_network();
+        self.joever = self.game.game_status.into_network();
 
         Ok(())
     }
 
-    fn possible_moves(&self) -> Vec<Move> {
+    fn possible_moves(&mut self) -> Vec<Move> {
         let mut moves = vec![];
 
         for y in 0..8 {
             for x in 0..8 {
-                let (m, castels) = self.game.possible_moves(chess::util::Square::try_from((x, y)).unwrap(), true).unwrap();
-                
-                for s in chess::util::get_square_array() {
-                    if let Some(mv) = m[s] {
-                        moves.push(mv.into_network());
+                if let Ok((m, castles)) = self.game.possible_moves(chess::util::Square::try_from((x, y)).unwrap(), true){
+                    for s in chess::util::get_square_array() {
+                        if let Some(mv) = m[s] {
+                            moves.push(mv.into_network(y as usize));
+                        }
+                    }
+    
+                    for c in castles {
+                        moves.push(c.into_network(y as usize));
                     }
                 }
-
-                for c in castels {
-                    moves.push(c.into_network());
-                }
+                
             }
         }
 
@@ -92,108 +109,47 @@ pub trait IntoChess<T> {
     fn into_chess(self) -> T;
 }
 
-pub trait IntoNetworkJoever {
-    fn into_network(self, color: &Color) -> Joever;
+pub trait IntoNetworkMove<T> {
+    fn into_network(self, rank: usize) -> T;
 }
 
-impl IntoNetworkJoever for bool {
-    fn into_network(self, color: &Color) -> Joever {
+impl IntoNetwork<Joever> for chess::GameStatus {
+    fn into_network(self) -> Joever {
         match self {
-            true => match color {
-                Color::White => Joever::White,
-                Color::Black => Joever::Black,
+            chess::GameStatus::Ongoing => Joever::Ongoing,
+            chess::GameStatus::Promoting => Joever::Ongoing,
+            chess::GameStatus::Checkmate(c) => match c {
+                chess::Color::White => Joever::Black,
+                chess::Color::Black => Joever::White,
             },
-            false => Joever::Ongoing,
         }
     }
 }
-
-/* pub trait IntoChessMoveGame<T> {
-    fn into_chess_move_game(self, game: &Game) -> T;
-}
-
-impl IntoChessMoveGame<chess::Move> for Move {
-    fn into_chess_move_game(self, game: &Game) -> chess::Move {
-        let capture = game.board[self.end_y][self.end_x].into_chess();
-
-        if game.board[self.start_y][self.start_x] == Piece::BlackKing || game.board[self.start_y][self.start_x] == Piece::WhiteKing {
-            if self.start_x as i32 - self.end_x as i32 == 2 {
-                return chess::Move::Castle { 
-                    from: (self.start_x, self.start_y),
-                    to: (self.end_x, self.end_y), 
-                    rook_from: (0, self.start_y), 
-                    rook_to: (3, self.start_y) 
-                };
-            }
-            else if self.start_x as i32 - self.end_x as i32 == -2 {
-                return chess::Move::Castle { 
-                    from: (self.start_x, self.start_y),
-                    to: (self.end_x, self.end_y), 
-                    rook_from: (7, self.start_y), 
-                    rook_to: (5, self.start_y) 
-                };
-            }
-        }
-        else if self.promotion != chess::PieceType::None {
-            if capture.is_some() {
-                return chess::Move::CapturePromotion { 
-                    from: (self.start_x, self.start_y),
-                    to: (self.end_x, self.end_y), 
-                    capture: (self.end_x, self.end_y), 
-                    promotion: self.promotion 
-                };
-            }
-            return chess::Move::QuietPromotion { 
-                from: (self.start_x, self.start_y),
-                to: (self.end_x, self.end_y), 
-                promotion: self.promotion 
-            };
-        }
-        else if let Some(chess::Piece { piece_type: chess::PieceType::Pawn, .. }) = game.board.into_chess().get_tile(self.start_x, self.start_y) {
-            if self.end_y == 0 || self.end_y == 7 {
-                return chess::Move::QuietPromotion { 
-                    from: (), 
-                    to: (), 
-                    promotion: self.promotion 
-                } { 
-                    from: (self.start_x, self.start_y),
-                    to: (self.end_x, self.end_y), 
-                    promotion: chess::PieceType::Queen 
-                };
-            }
-        }
-
-        chess::Move::Quiet { 
-            from: (self.start_x, self.start_y), 
-            to: (self.end_x, self.end_y) 
-        }
-    }
-} */
 
 impl IntoNetworkMove<Move> for chess::Move {
-    fn into_network(self, ) -> Move {
+    fn into_network(self, rank: usize) -> Move {
         match self {
             chess::Move::Normal { from, to } => Move {
-                start_x: from.file().into(),
-                start_y: from.rank().into(),
-                end_x: to.file().into(),
-                end_y: to.rank().into(),
+                start_x: i32::from(from.file) as usize,
+                start_y: i32::from(from.rank) as usize,
+                end_x: i32::from(to.file) as usize,
+                end_y: i32::from(to.rank) as usize,
                 promotion: Piece::None,
             },
             chess::Move::Castle { side } => {
                 match side {
                     chess::CastlingSide::KingSide => Move {
                         start_x: 4,
-                        start_y: 0,
+                        start_y: rank,
                         end_x: 6,
-                        end_y: 0,
+                        end_y: rank,
                         promotion: Piece::None,
                     },
                     chess::CastlingSide::QueenSide => Move {
                         start_x: 4,
-                        start_y: 0,
+                        start_y: rank,
                         end_x: 2,
-                        end_y: 0,
+                        end_y: rank,
                         promotion: Piece::None,
                     },
                 }
@@ -211,29 +167,7 @@ impl IntoNetwork<Color> for chess::Color {
     }
 }
 
-/* impl IntoChess<chess::PieceType> for Piece {
-    fn into_chess(self) -> chess::PieceType {
-        match self {
-            Piece::BlackBishop => chess::PieceType::Bishop,
-            Piece::BlackPawn => chess::PieceType::Pawn,
-            Piece::BlackKing => chess::PieceType::King,
-            Piece::BlackKnight => chess::PieceType::Knight,
-            Piece::BlackPawn => chess::PieceType::Pawn,
-            Piece::BlackQueen => chess::PieceType::Queen,
-            Piece::BlackRook => chess::PieceType::Rook,
-            Piece::WhiteBishop => chess::PieceType::Bishop,
-            Piece::WhitePawn => chess::PieceType::Pawn,
-            Piece::WhiteKing => chess::PieceType::King,
-            Piece::WhiteKnight => chess::PieceType::Knight,
-            Piece::WhitePawn => chess::PieceType::Pawn,
-            Piece::WhiteQueen => chess::PieceType::Queen,
-            Piece::WhiteRook => chess::PieceType::Rook,
-            Piece::None => unreachable!(),
-        }
-    }
-} */
-
-pub trait IntoNetworkPiece {
+/* pub trait IntoNetworkPiece {
     fn into_network(self, color: &Color) -> Piece;
 }
 
@@ -258,15 +192,15 @@ impl IntoNetworkPiece for chess::PieceType {
             },
         }
     }
-}
+} */
 
-impl IntoNetwork<[[Piece; 8]; 8]> for chess::Board {
+impl IntoNetwork<[[Piece; 8]; 8]> for chess::util::Board {
     fn into_network(self) -> [[Piece; 8]; 8] {
         let mut new_board = [[Piece::None; 8]; 8];
 
-        for (k, i) in (0..8).rev().enumerate() {
-            for j in 0..8 {
-                new_board[i][j] = self.get_tile(j, k).into_network();
+        for (y, rank) in chess::util::RANK_ARRAY.iter().enumerate() {
+            for (x, file) in chess::util::FILE_ARRAY.iter().enumerate() {
+                new_board[y][x] = self[*rank][*file].into_network();
             }
         }
         println!("{:?}", new_board);
@@ -274,7 +208,7 @@ impl IntoNetwork<[[Piece; 8]; 8]> for chess::Board {
     }
 }
 
-impl IntoChess<chess::Board> for [[Piece; 8]; 8] {
+/* impl IntoChess<chess::Board> for [[Piece; 8]; 8] {
     fn into_chess(self) -> chess::Board {
         let mut new_board = Game::new().game.get_board();
 
@@ -289,44 +223,44 @@ impl IntoChess<chess::Board> for [[Piece; 8]; 8] {
 
         new_board
     }
-}
+} */
 
 impl IntoNetwork<Piece> for Option<chess::Piece> {
     fn into_network(self) -> Piece {
         match self {
-            Some(chess::Piece { piece_type: chess::PieceType::Bishop, color: chess::Color::Black }) => Piece::BlackBishop,
-            Some(chess::Piece { piece_type: chess::PieceType::King, color: chess::Color::Black }) => Piece::BlackKing,
-            Some(chess::Piece { piece_type: chess::PieceType::Knight, color: chess::Color::Black }) => Piece::BlackKnight,
-            Some(chess::Piece { piece_type: chess::PieceType::Pawn, color: chess::Color::Black }) => Piece::BlackPawn,
-            Some(chess::Piece { piece_type: chess::PieceType::Queen, color: chess::Color::Black }) => Piece::BlackQueen,
-            Some(chess::Piece { piece_type: chess::PieceType::Rook, color: chess::Color::Black }) => Piece::BlackRook,
-            Some(chess::Piece { piece_type: chess::PieceType::Bishop, color: chess::Color::White }) => Piece::WhiteBishop,
-            Some(chess::Piece { piece_type: chess::PieceType::King, color: chess::Color::White }) => Piece::WhiteKing,
-            Some(chess::Piece { piece_type: chess::PieceType::Knight, color: chess::Color::White }) => Piece::WhiteKnight,
-            Some(chess::Piece { piece_type: chess::PieceType::Pawn, color: chess::Color::White }) => Piece::WhitePawn,
-            Some(chess::Piece { piece_type: chess::PieceType::Queen, color: chess::Color::White }) => Piece::WhiteQueen,
-            Some(chess::Piece { piece_type: chess::PieceType::Rook, color: chess::Color::White }) => Piece::WhiteRook,
+            Some(chess::Piece { piece: chess::PieceTypes::Bishop, color: chess::Color::Black }) => Piece::BlackBishop,
+            Some(chess::Piece { piece: chess::PieceTypes::King, color: chess::Color::Black }) => Piece::BlackKing,
+            Some(chess::Piece { piece: chess::PieceTypes::Knight, color: chess::Color::Black }) => Piece::BlackKnight,
+            Some(chess::Piece { piece: chess::PieceTypes::Pawn(_), color: chess::Color::Black }) => Piece::BlackPawn,
+            Some(chess::Piece { piece: chess::PieceTypes::Queen, color: chess::Color::Black }) => Piece::BlackQueen,
+            Some(chess::Piece { piece: chess::PieceTypes::Rook, color: chess::Color::Black }) => Piece::BlackRook,
+            Some(chess::Piece { piece: chess::PieceTypes::Bishop, color: chess::Color::White }) => Piece::WhiteBishop,
+            Some(chess::Piece { piece: chess::PieceTypes::King, color: chess::Color::White }) => Piece::WhiteKing,
+            Some(chess::Piece { piece: chess::PieceTypes::Knight, color: chess::Color::White }) => Piece::WhiteKnight,
+            Some(chess::Piece { piece: chess::PieceTypes::Pawn(_), color: chess::Color::White }) => Piece::WhitePawn,
+            Some(chess::Piece { piece: chess::PieceTypes::Queen, color: chess::Color::White }) => Piece::WhiteQueen,
+            Some(chess::Piece { piece: chess::PieceTypes::Rook, color: chess::Color::White }) => Piece::WhiteRook,
             None => Piece::None,
         }
     }
 }
 
-impl IntoChess<Option<chess::Piece>> for Piece {
+/* impl IntoChess<Option<chess::Piece>> for Piece {
     fn into_chess(self) -> Option<chess::Piece> {
         match self {
-            Piece::BlackBishop => Some(chess::Piece { piece_type: chess::PieceType::Bishop, color: chess::Color::Black }),
-            Piece::BlackKing => Some(chess::Piece { piece_type: chess::PieceType::King, color: chess::Color::Black }),
-            Piece::BlackKnight => Some(chess::Piece { piece_type: chess::PieceType::Knight, color: chess::Color::Black }),
-            Piece::BlackPawn => Some(chess::Piece { piece_type: chess::PieceType::Pawn, color: chess::Color::Black }),
-            Piece::BlackQueen => Some(chess::Piece { piece_type: chess::PieceType::Queen, color: chess::Color::Black }),
-            Piece::BlackRook => Some(chess::Piece { piece_type: chess::PieceType::Rook, color: chess::Color::Black }),
-            Piece::WhiteBishop => Some(chess::Piece { piece_type: chess::PieceType::Bishop, color: chess::Color::White }),
-            Piece::WhiteKing => Some(chess::Piece { piece_type: chess::PieceType::King, color: chess::Color::White }),
-            Piece::WhiteKnight => Some(chess::Piece { piece_type: chess::PieceType::Knight, color: chess::Color::White }),
-            Piece::WhitePawn => Some(chess::Piece { piece_type: chess::PieceType::Pawn, color: chess::Color::White }),
-            Piece::WhiteQueen => Some(chess::Piece { piece_type: chess::PieceType::Queen, color: chess::Color::White }),
-            Piece::WhiteRook => Some(chess::Piece { piece_type: chess::PieceType::Rook, color: chess::Color::White }),
+            Piece::BlackBishop => Some(chess::Piece { piece: chess::PieceTypes::Bishop, color: chess::Color::Black }),
+            Piece::BlackKing => Some(chess::Piece { piece: chess::PieceTypes::King, color: chess::Color::Black }),
+            Piece::BlackKnight => Some(chess::Piece { piece: chess::PieceTypes::Knight, color: chess::Color::Black }),
+            Piece::BlackPawn => Some(chess::Piece { piece: chess::PieceTypes::Pawn, color: chess::Color::Black }),
+            Piece::BlackQueen => Some(chess::Piece { piece: chess::PieceTypes::Queen, color: chess::Color::Black }),
+            Piece::BlackRook => Some(chess::Piece { piece: chess::PieceTypes::Rook, color: chess::Color::Black }),
+            Piece::WhiteBishop => Some(chess::Piece { piece: chess::PieceTypes::Bishop, color: chess::Color::White }),
+            Piece::WhiteKing => Some(chess::Piece { piece: chess::PieceTypes::King, color: chess::Color::White }),
+            Piece::WhiteKnight => Some(chess::Piece { piece: chess::PieceTypes::Knight, color: chess::Color::White }),
+            Piece::WhitePawn => Some(chess::Piece { piece: chess::PieceTypes::Pawn, color: chess::Color::White }),
+            Piece::WhiteQueen => Some(chess::Piece { piece: chess::PieceTypes::Queen, color: chess::Color::White }),
+            Piece::WhiteRook => Some(chess::Piece { piece: chess::PieceTypes::Rook, color: chess::Color::White }),
             Piece::None => None,
         }
     }
-}
+} */

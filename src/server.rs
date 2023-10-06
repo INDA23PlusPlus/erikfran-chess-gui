@@ -10,7 +10,7 @@ use local_ip_address::local_ip;
 
 pub trait UniversalGame {
     fn try_move(&mut self, m: Move) -> Result<(), String>;
-    fn possible_moves(&self) -> Vec<Move>;
+    fn possible_moves(&mut self) -> Vec<Move>;
     fn new() -> Self;
     fn board(&self) -> [[Piece; 8]; 8];
     fn turn(&self) -> Color;

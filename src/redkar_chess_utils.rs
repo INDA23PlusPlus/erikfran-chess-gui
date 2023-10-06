@@ -38,7 +38,7 @@ impl UniversalGame for Game {
         Ok(())
     }
 
-    fn possible_moves(&self) -> Vec<Move> {
+    fn possible_moves(&mut self) -> Vec<Move> {
         vec![]
     }
 

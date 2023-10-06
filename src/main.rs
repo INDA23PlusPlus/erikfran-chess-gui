@@ -32,7 +32,7 @@ const FONT_SIZE: f32 = 32.0;
 const DRAG_SENSITIVITY: f32 = 25.0 * SCALE;
 const CORD_OFFSET: f32 = 35.0;
 const CORD_FONT_SIZE: f32 = 30.0;
-const MOVE_RADIUS: f32 = 40.0 * SCALE;
+const MOVE_RADIUS: f32 = 25.0 * SCALE;
 const MOVE_CAPTURE_SIZE: f32 = 25.0 * SCALE;
 
 pub enum TcpToGame {
@@ -58,6 +58,7 @@ pub enum TcpToGame {
 pub enum Backend {
     Redkar,
     Fritiofr,
+    Erikfran,
 }
 
 struct MainState {
@@ -268,7 +269,7 @@ impl MainState {
             moves: vec![],
             features: vec![],
             turn: Color::White,
-            ip: local_ip().unwrap().to_string() + ":8384",
+            ip: local_ip().unwrap().to_string(),
             move_circle,
             move_capture,
             backend: Backend::Redkar,
@@ -372,8 +373,19 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             Backend::Fritiofr, 
                             "Fritiofr"
                         );
+                        ui.selectable_value(
+                            &mut self.backend, 
+                            Backend::Erikfran, 
+                            "Erikfran"
+                        );
                     });
-                    ui.label("Your ip: ".to_string() + local_ip().unwrap().to_string().as_str() + ":8384".as_str());
+                    ui.horizontal(|ui| {
+                        ui.label("Your ip: ".to_string() + local_ip().unwrap().to_string().as_str() + ":8384".as_str());
+                        
+                        if ui.button("Copy").clicked() {
+                            ui.output_mut(|o| o.copied_text = local_ip().unwrap().to_string() + ":8384".as_str());
+                        }
+                    });
                 }
     
                 if Some(false) == self.is_server {
@@ -392,8 +404,15 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     });
                     
                     ui.label("What is the IP of your opponent?");
-                    let ip = self.ip.clone();
-                    ui.add(egui::TextEdit::singleline(&mut self.ip).hint_text(ip));
+                    
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::multiline(&mut self.ip).hint_text(local_ip().unwrap().to_string()));
+                        
+                        if ui.button("Paste").clicked() {
+                            ui.output(|o| {println!("{}", o.copied_text.as_str().to_string());  self.ip = (&o.copied_text).to_string()});
+                            println!("{}", self.ip);
+                        }
+                    });
                 }
     
                 ui.add_enabled_ui(
@@ -404,10 +423,10 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             let (game_sender, game_receiver) = std::sync::mpsc::channel();
     
                             if Some(true) == self.is_server {
-                                let game = match self.backend {
+                                match self.backend {
                                     Backend::Fritiofr => thread::spawn(move || server::run(tcp_sender, game_receiver, crate::fritiofr_chess_utils::Game::new())),
                                     Backend::Redkar => thread::spawn(move || server::run(tcp_sender, game_receiver, crate::redkar_chess_utils::Game::new())),
-                                    //Backend::Erikfran => crate::erikfran_chess_utils::Game::new(),
+                                    Backend::Erikfran => thread::spawn(move || server::run(tcp_sender, game_receiver, crate::erikfran_chess_utils::Game::new())),
                                 };
 
                                 
@@ -442,15 +461,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
         if self.tcp_started && let Some(is_server) = self.is_server && let Some(server_color) = &self.server_color {
             let mut moves = [[false; 8]; 8];
 
-            let mut moves = [[false; 8]; 8];
-
             if let Some(pos) = self.selected {
-                println!("selected: {:?}", pos);
-
                 for m in &self.moves {
-                    println!("move: {:?}", m);
-                    moves[m.end_y][m.end_x] = m.start_x == pos.x as usize && m.start_y == pos.y as usize;
-                    println!("bool: {:?}", m.start_x == pos.x as usize && m.start_y == pos.y as usize);
+                    if m.start_x == pos.x as usize && m.start_y == pos.y as usize {
+                        moves[m.end_y][m.end_x] = true;
+                    }
                 }
             }
 
@@ -499,7 +514,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         else {
                             canvas.draw(&self.white_square, pos);
                         }
-                        if moves[y_c][x_c] {
+                        if moves[y][x] {
                             if your_turn(&self.turn, server_color, is_server) {
                                 move_color = Some(self.move_rgb_white)
                             }
@@ -553,7 +568,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             let text_pos = text_pos_x;
                             canvas.draw(&text, text_pos);
                         } */
-                        if moves[y_c][x_c] {
+                        if moves[y][x] {
                             if your_turn(&self.turn, server_color, is_server) {
                                 move_color = Some(self.move_rgb_black)
                             }
@@ -564,7 +579,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                     }
 
                     if let Some(color) = move_color {
-                        if self.board[y_c][x_c] == Piece::None {
+                        if self.board[y][x] == Piece::None {
                             canvas.draw(&self.move_circle, graphics::DrawParam::new()
                                 .dest(pos + Vec2::new(SQUARE_SIZE / 2.0, SQUARE_SIZE / 2.0))
                                 .color(color));
@@ -572,7 +587,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
                             draw_captured_move(&mut canvas, pos, &color, &self.move_capture)
                         }
                     }
-                        
 
                     let image = match self.board[y][x] {
                         Piece::WhitePawn => &self.pawn_image_w,
@@ -765,8 +779,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
                                 self.turn, 
                                 self.board[move_made.end_y][move_made.end_x],
                                 cords_to_square(move_made.start_x as f32, move_made.start_y as f32), 
-                                cords_to_square((x / SQUARE_SIZE).floor(), (y / SQUARE_SIZE).floor()
-                            )));
+                                cords_to_square(move_made.end_x as f32, move_made.end_y as f32)
+                            ));
                         self.turn = turn;
                         self.moves = moves;
                         self.selected = None;
@@ -794,8 +808,8 @@ fn draw_captured_move(canvas: &mut graphics::Canvas, pos: Vec2, color: &graphics
 
         canvas.draw(mesh, DrawParam {
             transform: graphics::Transform::Values {
-                dest: ggez::mint::Point2::from(pos + Vec2::new(0.0, SQUARE_SIZE - MOVE_CAPTURE_SIZE)),
-                rotation: PI / 2.0,
+                dest: ggez::mint::Point2::from(pos + Vec2::new(0.0, SQUARE_SIZE)),
+                rotation: 3.0 * PI / 2.0,
                 scale: ggez::mint::Vector2 { x: 1.0, y: 1.0 },
                 offset: ggez::mint::Point2 { x: 0.0, y: 0.0 }
             },
@@ -805,7 +819,7 @@ fn draw_captured_move(canvas: &mut graphics::Canvas, pos: Vec2, color: &graphics
 
     canvas.draw(mesh, DrawParam {
         transform: graphics::Transform::Values {
-            dest: ggez::mint::Point2::from(pos + Vec2::new(SQUARE_SIZE - MOVE_CAPTURE_SIZE, 0.0)),
+            dest: ggez::mint::Point2::from(pos + Vec2::new(SQUARE_SIZE, 0.0)),
             rotation: PI / 2.0,
             scale: ggez::mint::Vector2 { x: 1.0, y: 1.0 },
             offset: ggez::mint::Point2 { x: 0.0, y: 0.0 }
@@ -816,7 +830,7 @@ fn draw_captured_move(canvas: &mut graphics::Canvas, pos: Vec2, color: &graphics
 
     canvas.draw(mesh, DrawParam {
         transform: graphics::Transform::Values {
-            dest: ggez::mint::Point2::from(pos + Vec2::new(SQUARE_SIZE - MOVE_CAPTURE_SIZE, SQUARE_SIZE - MOVE_CAPTURE_SIZE)),
+            dest: ggez::mint::Point2::from(pos + Vec2::new(SQUARE_SIZE, SQUARE_SIZE)),
             rotation: PI,
             scale: ggez::mint::Vector2 { x: 1.0, y: 1.0 },
             offset: ggez::mint::Point2 { x: 0.0, y: 0.0 }
@@ -903,7 +917,7 @@ fn cord_to_file(x: f32) -> String {
 }
 
 fn cords_to_square(x: f32, y: f32) -> String {
-    cord_to_file(x) + y.to_string().as_str()
+    cord_to_file(x) + (y + 1.0).to_string().as_str()
 }
 
 mod client;

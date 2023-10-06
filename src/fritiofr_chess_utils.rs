@@ -26,15 +26,23 @@ impl UniversalGame for Game {
         }
     }
 
-    fn try_move(&mut self, m: Move) -> Result<(), String> {
-        let chess_moves = match self.game.gen_all_moves() {
-            Some(m) => m,
-            None => return Err("No moves available".to_string()),
-        };
+    fn try_move(&mut self, mv: Move) -> Result<(), String> {
+        let mut chess_moves = vec![];
 
-        let chess_move = match chess_moves.into_iter().find(|chess_move| chess_move.into_network() == m) {
+        for y in 0..8 {
+            for x in 0..8 {
+                let mut temp: Vec<chess::Move> = match self.game.gen_moves(x, y) {
+                    Some(m) => m,
+                    None => vec![],
+                };
+
+                chess_moves.append(&mut temp);
+            }
+        }
+
+        let chess_move = match chess_moves.into_iter().find(|chess_move| chess_move.into_network() == mv) {
             Some(m) => m,
-            None => return Err("No such move exists".to_string()),
+            None => return Err("That move is not one of the generated possible moves".to_string()),
         };
 
         match self.game.apply_move(chess_move) {
@@ -49,14 +57,21 @@ impl UniversalGame for Game {
         Ok(())
     }
 
-    fn possible_moves(&self) -> Vec<Move> {
+    fn possible_moves(&mut self) -> Vec<Move> {
         let mut moves = vec![];
 
         for y in 0..8 {
             for x in 0..8 {
                 let mut temp: Vec<Move> = match self.game.gen_moves(x, y) {
                     Some(m) => {
-                        m.into_iter().map(|m| m.into_network()).collect()
+                        m.into_iter().map(|m| {
+                            let mut temp = m.into_network();
+
+                            temp.end_y = 7 - temp.end_y;
+                            temp.start_y = 7 - temp.start_y;
+
+                            temp
+                        }).collect()
                     },
                     None => vec![],
                 };

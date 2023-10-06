@@ -413,7 +413,7 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 [[package]]
 name = "chess"
 version = "0.1.0"
-source = "git+https://github.com/INDA23PlusPlus/erikfran-chess#f3c75be0648b4a83a2d2486f99175616be87699d"
+source = "git+https://github.com/INDA23PlusPlus/erikfran-chess#1291bdb4a93e82d9faecab24db9c3bcef91b40d5"
 dependencies = [
  "pgn-reader",
  "reqwest",
