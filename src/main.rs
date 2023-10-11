@@ -456,8 +456,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                         ui.add(egui::TextEdit::multiline(&mut self.ip).hint_text(local_ip().unwrap().to_string()));
                         
                         if ui.button("Paste").clicked() {
-                            ui.output(|o| {println!("{}", o.copied_text.as_str().to_string());  self.ip = (&o.copied_text).to_string()});
-                            println!("{}", self.ip);
+                            ui.output(|o| {  self.ip = (&o.copied_text).to_string()});
                         }
                     });
                 }
